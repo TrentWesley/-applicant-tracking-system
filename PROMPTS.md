@@ -254,6 +254,175 @@ The next step is `/to-prd`.
 
 ---
 
+## Entry 8
+
+**Date:** 2026-10-27
+
+**Phase:** PRD
+
+**Prompt:**
+```
+/to-prd Create a complete Product Requirements Document (PRD) for the Applicant Tracking System.
+Use all 27 decisions from our grill-me session, PROMPTS.md, and both prototype findings files:
+- prototypes/hiring-stage-logic-findings.md
+- prototypes/dashboard-ui-findings.md
+Follow the professor's assignment requirements and use the approved technology stack: Python, Django,
+SQLite, uv, Tailwind CSS/DaisyUI through django-tailwind-cli, HTMX, Ruff, and automated Django tests.
+Include: project overview and scope; Admin and Recruiter roles and permissions; Candidate, JobOpening,
+Application, Skill, and StageChange models; functional and nonfunctional requirements; hiring-stage
+transition rules and audit logging; validation, archiving, deletion, and concurrency safeguards;
+dashboard requirements and selected UI design; acceptance criteria and testable requirements; explicit
+out-of-scope features. Incorporate the prototype-driven changes, especially allowing reactivation on
+closed jobs and permitting hired candidates to be archived. Create the PRD document, but do not
+generate the implementation plan or write production code yet.
+```
+Follow-up prompt: finalise the two open details listed in the draft, review the PRD for consistency
+with all 27 decisions and both findings documents, update this log, and report any remaining
+contradictions. Don't commit yet; the milestone commit comes after the implementation plan.
+
+**Result:**
+`prd/applicant-tracking-system.md`, following the `/to-prd` template plus an acceptance-criteria section:
+- **Problem Statement and Solution.**
+- **User stories:** access and roles, candidates, job openings and skills, applications and stages,
+  staff accounts, and dashboard and navigation (60 in the final version).
+- **Implementation Decisions:**
+  - the tech stack and conventions;
+  - a Recruiter/Admin permission table;
+  - all five models plus staff users, with fields, constraints and `on_delete` rules;
+  - the stage transition table;
+  - the single stage-change service, with the prototype's check order (out-of-date stage → move allowed
+    → required note → archived-candidate guard) and the SQLite-safe conditional update;
+  - archive and delete rules;
+  - pages and HTMX behaviour;
+  - the variant-A sidebar shell with variant-B badges, and the nonfunctional requirements.
+- **Testable acceptance criteria** (AC1–AC45 in the final version).
+- **Out of Scope** list and **Further Notes**.
+- **Prototype-driven changes are included:** reactivation on closed jobs (Q23; user story 40, AC25)
+  and archiving hired candidates (Q24; user story 13, AC6).
+
+**Feedback and decisions:**
+The first draft left two details open. I finalised them:
+1. **Staff reactivation:** Admins can reactivate deactivated staff accounts by setting `is_active`
+   back to true. Only Admins manage activation and deactivation, and all history is preserved.
+   This added user story 52 and AC37, and the staff list gained a "show inactive" option.
+2. **New Application entry points:** a button on the Applications list page and on the candidate
+   detail page, both opening the same creation form. From a candidate's page, that candidate is
+   preselected. This added user stories 32–33 and AC33. Archived candidates show no button, and the
+   server still refuses them.
+
+Claude Code then reviewed the PRD against Q1–Q27 and both findings documents. It found no
+contradictions, and three minor unresolved details:
+- **Last-Admin guard and role changes:** the guard covered deactivation, but not demoting the last
+  active Admin, or yourself, to Recruiter.
+- **How job status changes:** both the job edit form and the Close and Reopen actions could change it,
+  and the default status for a new job wasn't stated.
+- **Editing application notes:** there was no rule for whether the optional notes field can be edited
+  after creation.
+
+I accepted all three of Claude Code's recommendations, and they're now in the PRD:
+3. **Admin role protection:** Admins can't demote themselves to Recruiter, and the last active Admin
+   can't be demoted or deactivated. Both are enforced on the server and tested. This updated user
+   story 53, the staff rules, and AC38.
+4. **Job status:** new jobs default to Open, and status changes only through the dedicated Close and
+   Reopen actions. The create and edit forms have no status field, and closing or reopening preserves
+   applications and history. This updated user stories 20, 21 and 24, the JobOpening rules, and AC11.
+5. **Application notes:** Recruiters and Admins can edit `Application.notes` after creation, with no
+   stage change and no StageChange. StageChange notes stay immutable and can't be edited or deleted
+   through the UI. This added user story 49, the Application and StageChange rules, and AC34.
+
+**Final PRD counts:** 60 user stories and 45 acceptance criteria (AC1–AC45). It's internally
+consistent and has no open questions.
+
+---
+
+## Entry 9
+
+**Date:** 2026-10-27
+
+**Phase:** Implementation planning (`/prd-to-plan`)
+
+**Prompt:**
+```
+/prd-to-plan Create a phased implementation plan for my Applicant Tracking System using the
+finalized PRD at prd/applicant-tracking-system.md. Read PROMPTS.md and both prototype findings
+documents for context. Follow the professor's required planning process and break implementation
+into manageable phases. Requirements: Cover all 60 user stories and 45 acceptance criteria. Use
+Python, Django, SQLite, uv, Tailwind CSS/DaisyUI through django-tailwind-cli, HTMX, and Ruff.
+Follow Test-Driven Development (Red-Green-Refactor). Include clear deliverables, dependencies, and
+testing requirements for every phase. Keep the implementation focused on the assignment. Do not
+write production code yet.
+```
+Follow-up prompt: approved the breakdown and asked for the plan file, with an objective and scope,
+dependencies, implementation tasks, tests to write first, acceptance criteria covered and a
+completion checklist for every phase, plus a check that all 60 user stories and AC1–AC45 are
+accounted for.
+
+**Result:**
+Claude Code followed the skill's steps:
+1. It read the PRD, both findings documents and this log, and confirmed the repository had no
+   Django code yet.
+2. It identified the durable architectural decisions.
+3. It proposed tracer-bullet vertical slices as a numbered list, with user stories and ACs for
+   each.
+4. It asked me about granularity and order before writing anything.
+
+**Architectural decisions (in the plan header):**
+- **Django 5.1 or later,** so `LoginRequiredMiddleware` protects every page; a `config/` project
+  package.
+- **Five apps:**
+  - `core`: base layout, badges, dashboard and permission helpers;
+  - `candidates`;
+  - `jobs`: JobOpening and Skill;
+  - `pipeline`: Application, StageChange and the single stage-change service;
+  - `staff`: built-in `User`, no custom user model.
+- **Roles:** `Recruiter` and `Admin` groups using Django model permissions. Archiving, closing,
+  stage moves and notes edits count as "change"; deletes, skills management and user management
+  are Admin only. Every restricted view checks the permission on the server.
+- **URLs:** pk-based and app-namespaced. Stage moves use one HTMX POST to
+  `/applications/<pk>/transition/` carrying the action and the expected stage.
+- **TDD in every phase:** Red, Green, Refactor; then Ruff, the full test suite, a `PROMPTS.md`
+  entry, and a commit and push.
+
+**Approved 13-phase breakdown:**
+
+| # | Phase | User stories |
+|---|---|---|
+| 1 | Project setup, login, roles and sidebar layout | 1–5, 59 |
+| 2 | Candidates (create, list, detail, edit) | 6–10 |
+| 3 | Skills and job openings | 20, 26–29 |
+| 4 | Applications (creation, list, detail and history) | 32–35, 45, 46 |
+| 5 | Advance and Back over HTMX, with stale and double-click safety | 36, 37, 43, 44 |
+| 6 | Reject, Withdraw and Reactivate; Hired is permanent | 38, 39, 41, 42 |
+| 7 | Close and reopen jobs | 21–24, 40 |
+| 8 | Candidate archive and restore | 11–16 |
+| 9 | Edit application notes | 49 |
+| 10 | Admin permanent deletes | 17, 18, 30, 31, 47, 48 |
+| 11 | Staff management | 50–54 |
+| 12 | Dashboard | 55–58 |
+| 13 | Badges, detail-page summaries and final check | 19, 25, 60 |
+
+- **Order:** close/reopen and archive come after the stage moves, because their key rules can only
+  be tested once Reject and Reactivate exist. This mirrors how the logic prototype found the Q23
+  problem.
+- **Output:** `plans/applicant-tracking-system.md`, with coverage tables mapping every user story
+  and AC to its phase. A script confirmed 60 of 60 user stories and 45 of 45 ACs.
+- **Criteria built up over several phases:**
+  - **AC21 and AC22 (stage moves):** Phases 5 and 6.
+  - **AC25 (reactivation):** Phase 6 (Hired), Phase 7 (closed job), Phase 8 (archived candidate).
+  - **AC2 and AC3 (permissions):** tested in each relevant phase, with a comprehensive review in
+    Phase 13.
+
+**Feedback and decisions:**
+- I approved all 13 phases with no merges or splits, kept the order, and approved the five apps.
+- I required Django 5.1 or later, permission tests in each relevant phase plus a final review,
+  strict TDD, and staying focused on the assignment.
+- **Open detail, reported by Claude Code:** Django creates model permissions only after migrations
+  run, so the migration that assigns them to groups must create them first. This will be settled
+  with a test in Phase 1.
+- **Next step:** the milestone commit "Completed Grill me, PRD, and plan", then Phase 1.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:
