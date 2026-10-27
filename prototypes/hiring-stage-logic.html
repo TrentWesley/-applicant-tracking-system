@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiring Stage Rules (Prototype)</title>
+<!--
+  THROWAWAY PROTOTYPE — not production code.
+  Question: do the ATS hiring-stage rules behave correctly in the awkward cases?
+  Open this file directly in a browser. Nothing is saved; reload to start over.
+-->
+<style>
+  :root {
+    --accent: #2f5bd3; --accent-soft: #e9eefc;
+    --ink: #1d2330; --muted: #667085; --line: #e4e7ec;
+    --bg: #f6f7f9; --card: #ffffff;
+    --ok: #1a7f4b; --ok-soft: #e8f6ee;
+    --bad: #b42318; --bad-soft: #fdeceb;
+    --hl: #fff4cc;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 0 0 12px; }
+  h3 { font-size: 12px; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  p { margin: 0 0 10px; }
+  .intro { color: var(--muted); max-width: 860px; margin-bottom: 20px; }
+  .intro strong { color: var(--ink); }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .tab { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px;
+         padding: 6px 14px; cursor: pointer; font: inherit; font-size: 14px; }
+  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  button.act { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+               border: 1px solid var(--accent); background: var(--card); color: var(--accent); }
+  button.act:hover { background: var(--accent-soft); }
+  button.act.primary { background: var(--accent); color: #fff; }
+  button.act.blocked { border-style: dashed; border-color: var(--muted); color: var(--muted); }
+  button.act:disabled { opacity: .45; cursor: default; background: var(--card); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  label.toggle { font-size: 14px; color: var(--muted); display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  select, input[type=text] { font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  input[type=text] { min-width: 240px; }
+
+  .banner { border-radius: 10px; padding: 12px 16px; margin-bottom: 18px; border: 1px solid; white-space: pre-line; }
+  .banner.ok { background: var(--ok-soft); border-color: #b7e2c9; }
+  .banner.bad { background: var(--bad-soft); border-color: #f5c2bd; }
+  .banner.idle { background: var(--card); border-color: var(--line); color: var(--muted); }
+  .banner b { display: block; margin-bottom: 2px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .screen h2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .card .who { font-weight: 600; }
+  .card .stale { font-size: 13px; color: var(--bad); margin-top: 4px; }
+  .card .actions { margin-top: 10px; }
+  .noteform { margin-top: 10px; padding: 10px; background: var(--bg); border-radius: 6px; }
+  .noteform .lbl { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+  .pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+          background: var(--accent-soft); color: var(--accent); }
+  .pill.Hired { background: var(--ok-soft); color: var(--ok); }
+  .pill.Rejected, .pill.Withdrawn { background: #eef0f3; color: var(--muted); }
+  .pill.flag { background: var(--bad-soft); color: var(--bad); font-weight: 500; }
+  .pill.plain { background: #eef0f3; color: var(--ink); font-weight: 500; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); padding: 6px 8px; }
+  td { border-bottom: 1px solid var(--line); padding: 7px 8px; vertical-align: top; }
+  tr.changed td { background: var(--hl); }
+  .muted { color: var(--muted); }
+
+  .steps { list-style: none; margin: 12px 0 0; padding: 0; counter-reset: s; }
+  .steps li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+  .steps li::before { counter-increment: s; content: counter(s); flex: 0 0 24px; height: 24px; border-radius: 50%;
+                      background: var(--bg); color: var(--muted); font-size: 12px; display: grid; place-items: center; }
+  .steps li.done::before { background: var(--accent); color: #fff; }
+  .steps .res { font-size: 13px; margin-top: 4px; white-space: pre-line; }
+  .steps .res .verdict { font-weight: 600; }
+  .steps .res .verdict.good { color: var(--ok); }
+  .steps .res .verdict.badv { color: var(--bad); }
+  .watch { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; margin-top: 10px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Hiring stage rules — try them out</h1>
+  <p class="intro">
+    <strong>The question:</strong> do our rules for moving job applications between hiring stages hold up in the awkward cases —
+    bringing back a rejected or withdrawn candidate, archived candidates and closed jobs getting in the way, two recruiters
+    looking at out-of-date screens, accidental double-clicks, notes that must be written, and "Hired" being permanent?
+    Use <strong>Free play</strong> to poke at anything, or pick a <strong>walkthrough</strong> tab to run a prepared story step by step.
+    Nothing is saved — reload the page to start over.
+  </p>
+
+  <div class="tabs" id="tabs"></div>
+  <div class="panel" id="controls"></div>
+  <div id="banner"></div>
+
+  <div class="grid2">
+    <div class="panel screen" id="screenA"></div>
+    <div class="panel screen" id="screenB"></div>
+  </div>
+
+  <div class="panel" id="records"></div>
+</div>
+
+<script>
+/* ===================== LOGIC-START (pure: no DOM below until LOGIC-END) ===================== */
+
+// The rules. Every function takes a state and returns a new one; nothing here touches the page.
+const Rules = (() => {
+  const ACTIVE = ['Applied', 'Screening', 'Interview', 'Final Review', 'Offer'];
+  const TERMINAL = ['Hired', 'Rejected', 'Withdrawn'];
+  const KINDS = ['advance', 'back', 'reject', 'withdraw', 'reactivate'];
+  const VERB = { reject: 'reject', withdraw: 'withdraw', reactivate: 'reactivate' };
+  const HIRED_FINAL = 'Hired is permanent — this application can never move again.';
+  const isActive = (stage) => ACTIVE.includes(stage);
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+
+  function initialState() {
+    return {
+      clock: 0,
+      candidates: {
+        jane:  { name: 'Jane Doe',   archived: false },
+        sam:   { name: 'Sam Lee',    archived: false },
+        priya: { name: 'Priya Shah', archived: false },
+      },
+      jobs: {
+        backend: { title: 'Backend Developer', status: 'Open' },
+        analyst: { title: 'Data Analyst',      status: 'Open' },
+      },
+      applications: {},
+      history: [],
+      nextApp: 1,
+    };
+  }
+
+  const appName = (s, id) => {
+    const a = s.applications[id];
+    return `${s.candidates[a.candidate].name} – ${s.jobs[a.job].title}`;
+  };
+  const activeApps = (s, field, key) =>
+    Object.values(s.applications).filter((a) => a[field] === key && isActive(a.stage));
+  const hiredApps = (s, field, key) =>
+    Object.values(s.applications).filter((a) => a[field] === key && a.stage === 'Hired');
+
+  // The stage an application was in just before it became Rejected/Withdrawn (read from history).
+  function reactivationTarget(s, appId) {
+    const entries = s.history.filter((h) => h.app === appId);
+    const last = entries[entries.length - 1];
+    return last && isActive(last.from) ? last.from : null;
+  }
+
+  // What would `kind` do to `app` if it were at `stage`? Returns {to, needsNote} or {blocked}.
+  function plan(s, app, stage, kind) {
+    const i = ACTIVE.indexOf(stage);
+    const cand = s.candidates[app.candidate];
+    switch (kind) {
+      case 'advance':
+        if (stage === 'Hired') return { blocked: HIRED_FINAL };
+        if (i === -1) return { blocked: `A ${stage} application can't be advanced — reactivate it first.` };
+        return { to: i === ACTIVE.length - 1 ? 'Hired' : ACTIVE[i + 1] };
+      case 'back':
+        if (stage === 'Hired') return { blocked: HIRED_FINAL };
+        if (i === -1) return { blocked: `A ${stage} application can't go back — use Reactivate instead.` };
+        if (i === 0) return { blocked: 'Applied is the first stage — there is nothing to go back to.' };
+        return { to: ACTIVE[i - 1] };
+      case 'reject':
+      case 'withdraw':
+        if (stage === 'Hired') return { blocked: HIRED_FINAL };
+        if (i === -1) return { blocked: `This application is already ${stage}.` };
+        return { to: kind === 'reject' ? 'Rejected' : 'Withdrawn', needsNote: true };
+      case 'reactivate': {
+        if (stage === 'Hired') return { blocked: HIRED_FINAL };
+        if (i !== -1) return { blocked: `Only Rejected or Withdrawn applications can be reactivated — this one is still active (${stage}).` };
+        // A closed job does NOT block reactivation: it's an existing application, not new intake.
+        if (cand.archived) return { blocked: `${cand.name} is archived — restore the candidate first.` };
+        return { to: reactivationTarget(s, app.id), needsNote: true };
+      }
+    }
+  }
+
+  // Buttons a screen would show for an application it believes is at `shownStage`.
+  const actionsFor = (s, appId, shownStage) =>
+    KINDS.map((kind) => ({ kind, ...plan(s, s.applications[appId], shownStage, kind) }));
+
+  const refuse = (s, message, extra = {}) => ({ state: s, ok: false, message, changed: [], ...extra });
+
+  function move(s, { app: appId, kind, expected, note = '', by }) {
+    const app = s.applications[appId];
+    // 1. Stale check first: the user must have been looking at the real current stage.
+    if (app.stage !== expected) {
+      return refuse(s, `Nothing changed. Your screen showed ${expected}, but this application is already at ${app.stage} — ` +
+        `someone else moved it, or this was a repeated click. Your card has been refreshed; check it before trying again.`, { stale: true });
+    }
+    // 2. Is the move legal from the current stage?
+    const p = plan(s, app, app.stage, kind);
+    if (p.blocked) return refuse(s, `Nothing changed. ${p.blocked}`);
+    // 3. Required note (whitespace doesn't count).
+    const cleanNote = (note || '').trim();
+    if (p.needsNote && !cleanNote) return refuse(s, `Nothing changed. A note explaining why is required to ${VERB[kind]} an application.`);
+    // 4. Apply: stage update + exactly one history entry, together.
+    const n = clone(s);
+    n.clock++;
+    const a = n.applications[appId];
+    const from = a.stage;
+    a.stage = p.to;
+    a.changedAt = n.clock;
+    n.history.push({ step: n.clock, app: appId, from, to: p.to, by, note: cleanNote });
+    return { state: n, ok: true, message: `${appName(n, appId)}: ${from} → ${p.to}.`, changed: [`app:${appId}`, `hist:${n.history.length - 1}`] };
+  }
+
+  function createApplication(s, { candidate, job, by }) {
+    const c = s.candidates[candidate];
+    const j = s.jobs[job];
+    const reasons = [];
+    if (j.status === 'Closed') reasons.push(`${j.title} is closed and isn't accepting new applications.`);
+    if (c.archived) reasons.push(`${c.name} is archived — restore the candidate first.`);
+    if (Object.values(s.applications).some((a) => a.candidate === candidate && a.job === job)) {
+      reasons.push(`${c.name} already has an application for ${j.title} (only one per candidate per job — even after a job is reopened).`);
+    }
+    if (reasons.length) return refuse(s, `Application not created. ${reasons.join(' ')}`);
+    const n = clone(s);
+    n.clock++;
+    const id = n.nextApp++;
+    n.applications[id] = { id, candidate, job, stage: 'Applied', changedAt: n.clock };
+    n.history.push({ step: n.clock, app: id, from: null, to: 'Applied', by, note: '' });
+    return { state: n, ok: true, message: `New application: ${appName(n, id)} starts at Applied.`, changed: [`app:${id}`, `hist:${n.history.length - 1}`], newApp: id };
+  }
+
+  function archiveCandidate(s, { candidate }) {
+    const c = s.candidates[candidate];
+    if (c.archived) return refuse(s, `${c.name} is already archived.`);
+    const active = activeApps(s, 'candidate', candidate);
+    if (active.length) {
+      return refuse(s, `Can't archive ${c.name} — these applications are still active and must be moved to Hired, Rejected or Withdrawn first:\n` +
+        active.map((a) => `• ${s.jobs[a.job].title} (${a.stage})`).join('\n'));
+    }
+    const n = clone(s);
+    n.clock++;
+    n.candidates[candidate].archived = true;
+    return { state: n, ok: true, message: `${c.name} archived. They can't receive new applications or be reactivated until restored.`, changed: [`cand:${candidate}`] };
+  }
+
+  function restoreCandidate(s, { candidate }) {
+    const c = s.candidates[candidate];
+    if (!c.archived) return refuse(s, `${c.name} isn't archived.`);
+    const n = clone(s);
+    n.clock++;
+    n.candidates[candidate].archived = false;
+    return { state: n, ok: true, message: `${c.name} restored. No application stages or history changed.`, changed: [`cand:${candidate}`] };
+  }
+
+  function closeJob(s, { job }) {
+    const j = s.jobs[job];
+    if (j.status === 'Closed') return refuse(s, `${j.title} is already closed.`);
+    const n = clone(s);
+    n.clock++;
+    n.jobs[job].status = 'Closed';
+    const active = activeApps(n, 'job', job).length;
+    return { state: n, ok: true, changed: [`job:${job}`],
+      message: `${j.title} closed. No new applications. ${active ? `${active} active application(s) keep moving as normal.` : 'No active applications.'}` };
+  }
+
+  function reopenJob(s, { job }) {
+    const j = s.jobs[job];
+    if (j.status === 'Open') return refuse(s, `${j.title} is already open.`);
+    const n = clone(s);
+    n.clock++;
+    n.jobs[job].status = 'Open';
+    return { state: n, ok: true, message: `${j.title} reopened. New applications allowed again; no existing applications changed.`, changed: [`job:${job}`] };
+  }
+
+  function dispatch(s, action) {
+    switch (action.type) {
+      case 'move': return move(s, action);
+      case 'create': return createApplication(s, action);
+      case 'archive': return archiveCandidate(s, action);
+      case 'restore': return restoreCandidate(s, action);
+      case 'close': return closeJob(s, action);
+      case 'reopen': return reopenJob(s, action);
+    }
+    throw new Error(`Unknown action ${action.type}`);
+  }
+
+  return { ACTIVE, TERMINAL, KINDS, isActive, initialState, dispatch, actionsFor, appName, activeApps, hiredApps };
+})();
+
+// Simulates two recruiters' browser screens. Each screen remembers the stage it last rendered,
+// and sends that as the "expected stage" when a button is clicked (like the hidden field in the HTMX form).
+const Sim = (() => {
+  const stagesOf = (S) => Object.fromEntries(Object.values(S.applications).map((a) => [a.id, a.stage]));
+
+  function step(w, action) {
+    const screens = { A: { ...w.screens.A }, B: { ...w.screens.B } };
+    if (action.type === 'refresh') {
+      screens[action.screen] = stagesOf(w.S);
+      return { world: { S: w.S, screens }, ok: true, outcome: 'ok', changed: [],
+        message: `Recruiter ${action.screen} reloaded the page and now sees the current stages.` };
+    }
+    if (action.type === 'doubleClick') {
+      const expected = screens[action.screen][action.app];
+      const first = step(w, { ...action, type: 'move', expected });
+      const second = step(first.world, { ...action, type: 'move', expected });
+      return { world: second.world, ok: first.ok, changed: [...first.changed, ...second.changed],
+        outcome: first.ok && !second.ok ? 'first-only' : first.ok && second.ok ? 'both' : 'neither',
+        message: `Two identical requests arrived (both sent while the screen showed ${expected}).\n` +
+          `Click 1: ${first.message}\nClick 2: ${second.message}` };
+    }
+    const by = `Recruiter ${action.screen || 'A'}`;
+    if (action.type === 'move') {
+      const expected = action.expected ?? screens[action.screen][action.app] ?? w.S.applications[action.app].stage;
+      const r = Rules.dispatch(w.S, { ...action, expected, by });
+      screens[action.screen][action.app] = r.state.applications[action.app].stage; // card is refreshed either way
+      return { world: { S: r.state, screens }, ok: r.ok, outcome: r.ok ? 'ok' : 'refused', message: r.message, changed: r.changed };
+    }
+    const r = Rules.dispatch(w.S, { ...action, by });
+    if (r.newApp) { screens.A[r.newApp] = 'Applied'; screens.B[r.newApp] = 'Applied'; }
+    return { world: { S: r.state, screens }, ok: r.ok, outcome: r.ok ? 'ok' : 'refused', message: r.message, changed: r.changed };
+  }
+
+  function fresh(setup = []) {
+    let w = { S: Rules.initialState(), screens: { A: {}, B: {} } };
+    for (const a of setup) {
+      const r = step(w, a);
+      if (!r.ok) throw new Error(`Scenario setup failed: ${r.message}`);
+      w = r.world;
+    }
+    return { S: w.S, screens: { A: stagesOf(w.S), B: stagesOf(w.S) } };
+  }
+
+  return { step, fresh };
+})();
+
+// Prepared walkthroughs. `expect` is what our rules say should happen; the page checks it.
+const mv = (screen, app, kind, note) => ({ type: 'move', screen, app, kind, note });
+const toStage = (app, n) => Array.from({ length: n }, () => mv('A', app, 'advance'));
+
+const SCENARIOS = [
+  {
+    title: 'Happy path & Hired is final',
+    blurb: 'Jane applies for Backend Developer and moves all the way to Hired, with one correction on the way. Then we try to move a Hired application.',
+    watch: 'Back from Applied is refused. Every successful click adds exactly one history line. Once Hired, every action is refused.',
+    setup: [{ type: 'create', candidate: 'jane', job: 'backend' }],
+    steps: [
+      { label: 'Recruiter A advances Jane (Applied → Screening)', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Recruiter A clicks Back to correct it (Screening → Applied)', action: mv('A', 1, 'back'), expect: 'ok' },
+      { label: 'Recruiter A tries Back again from Applied', action: mv('A', 1, 'back'), expect: 'refused' },
+      { label: 'Advance → Screening', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Advance → Interview', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Advance → Final Review', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Advance → Offer', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Advance → Hired', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Try Back on the Hired application', action: mv('A', 1, 'back'), expect: 'refused' },
+      { label: 'Try Reject (with a note) on the Hired application', action: mv('A', 1, 'reject', 'Changed our mind'), expect: 'refused' },
+      { label: 'Try Reactivate on the Hired application', action: mv('A', 1, 'reactivate', 'Testing'), expect: 'refused' },
+    ],
+  },
+  {
+    title: 'Notes & reactivation',
+    blurb: 'Jane is at Interview. We check that Reject, Withdraw and Reactivate demand a real note, and that reactivation returns her to the stage she left — the most recent one.',
+    watch: 'Blank and spaces-only notes are both refused. The second reactivation returns to Final Review, not Interview.',
+    setup: [{ type: 'create', candidate: 'jane', job: 'backend' }, ...toStage(1, 2)],
+    steps: [
+      { label: 'Reject Jane with no note', action: mv('A', 1, 'reject', ''), expect: 'refused' },
+      { label: 'Reject Jane with a note of only spaces', action: mv('A', 1, 'reject', '    '), expect: 'refused' },
+      { label: 'Reject Jane with note "Weak system-design interview"', action: mv('A', 1, 'reject', 'Weak system-design interview'), expect: 'ok' },
+      { label: 'Try Advance on the Rejected application', action: mv('A', 1, 'advance'), expect: 'refused' },
+      { label: 'Reactivate with no note', action: mv('A', 1, 'reactivate', ''), expect: 'refused' },
+      { label: 'Reactivate with note "Hiring manager wants a second look"', action: mv('A', 1, 'reactivate', 'Hiring manager wants a second look'), expect: 'ok' },
+      { label: 'Advance → Final Review', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Withdraw with note "Accepted another offer"', action: mv('A', 1, 'withdraw', 'Accepted another offer'), expect: 'ok' },
+      { label: 'Reactivate with note "Other offer fell through"', action: mv('A', 1, 'reactivate', 'Other offer fell through'), expect: 'ok' },
+    ],
+  },
+  {
+    title: 'Archived blocks, closed does not',
+    blurb: 'Jane withdraws from Backend Developer at Final Review. The job is closed and Jane is archived. We try to bring her back.',
+    watch: 'Reactivation is refused only while Jane is archived. Once she is restored, it works even though the job is still closed — and the job stays Closed.',
+    setup: [{ type: 'create', candidate: 'jane', job: 'backend' }, ...toStage(1, 3)],
+    steps: [
+      { label: 'Withdraw Jane with note "Paused her job search"', action: mv('A', 1, 'withdraw', 'Paused her job search'), expect: 'ok' },
+      { label: 'Close the Backend Developer job', action: { type: 'close', job: 'backend' }, expect: 'ok' },
+      { label: 'Archive Jane', action: { type: 'archive', candidate: 'jane' }, expect: 'ok' },
+      { label: 'Reactivate Jane (note: "Back on the market")', action: mv('A', 1, 'reactivate', 'Back on the market'), expect: 'refused' },
+      { label: 'Restore Jane', action: { type: 'restore', candidate: 'jane' }, expect: 'ok' },
+      { label: 'Reactivate Jane with no note (job still closed)', action: mv('A', 1, 'reactivate', ''), expect: 'refused' },
+      { label: 'Reactivate Jane (note: "Back on the market") — job still closed', action: mv('A', 1, 'reactivate', 'Back on the market'), expect: 'ok' },
+      { label: 'Add Priya to the still-closed job', action: { type: 'create', candidate: 'priya', job: 'backend' }, expect: 'refused' },
+    ],
+  },
+  {
+    title: 'Two screens & double-clicks',
+    blurb: 'Both recruiters have the pipeline open and both see Jane at Interview. Recruiter A moves her; Recruiter B\'s screen is now out of date.',
+    watch: 'The out-of-date click is refused even for a Reject. The double-click moves Jane only once, and the history gets only one new line.',
+    setup: [{ type: 'create', candidate: 'jane', job: 'backend' }, ...toStage(1, 2)],
+    steps: [
+      { label: 'Recruiter A advances Jane (Interview → Final Review)', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Recruiter B (screen still says Interview) clicks Advance', action: mv('B', 1, 'advance'), expect: 'refused' },
+      { label: 'Recruiter B, now seeing Final Review, clicks Advance', action: mv('B', 1, 'advance'), expect: 'ok' },
+      { label: 'Recruiter A (screen still says Final Review) rejects with a note', action: mv('A', 1, 'reject', 'Salary expectations too high'), expect: 'refused' },
+      { label: 'Recruiter A reloads the page', action: { type: 'refresh', screen: 'A' }, expect: 'ok' },
+      { label: 'Recruiter A double-clicks Back (Offer → Final Review)', action: { type: 'doubleClick', screen: 'A', app: 1, kind: 'back' }, expect: 'first-only' },
+    ],
+  },
+  {
+    title: 'Archiving & closing jobs',
+    blurb: 'Jane is active on two jobs and Sam has applied for Backend Developer. We see how archiving a candidate and closing a job interact with live applications.',
+    watch: 'Archiving is refused with a list of what is still active. A closed job still lets existing applications move, but refuses new ones. Restoring changes no stages.',
+    setup: [
+      { type: 'create', candidate: 'jane', job: 'backend' }, ...toStage(1, 2),
+      { type: 'create', candidate: 'jane', job: 'analyst' }, ...toStage(2, 1),
+      { type: 'create', candidate: 'sam', job: 'backend' },
+    ],
+    steps: [
+      { label: 'Archive Jane', action: { type: 'archive', candidate: 'jane' }, expect: 'refused' },
+      { label: 'Close the Backend Developer job', action: { type: 'close', job: 'backend' }, expect: 'ok' },
+      { label: 'Advance Jane on the closed Backend job (Interview → Final Review)', action: mv('A', 1, 'advance'), expect: 'ok' },
+      { label: 'Add Priya to the closed Backend job', action: { type: 'create', candidate: 'priya', job: 'backend' }, expect: 'refused' },
+      { label: 'Reject Jane for Backend (note: "Went with internal hire")', action: mv('A', 1, 'reject', 'Went with internal hire'), expect: 'ok' },
+      { label: 'Withdraw Jane from Data Analyst (note: "Relocating")', action: mv('A', 2, 'withdraw', 'Relocating'), expect: 'ok' },
+      { label: 'Archive Jane', action: { type: 'archive', candidate: 'jane' }, expect: 'ok' },
+      { label: 'Add Jane to Data Analyst again', action: { type: 'create', candidate: 'jane', job: 'analyst' }, expect: 'refused' },
+      { label: 'Restore Jane', action: { type: 'restore', candidate: 'jane' }, expect: 'ok' },
+      { label: 'Reopen the Backend Developer job', action: { type: 'reopen', job: 'backend' }, expect: 'ok' },
+      { label: 'Add Priya to Backend Developer', action: { type: 'create', candidate: 'priya', job: 'backend' }, expect: 'ok' },
+    ],
+  },
+  {
+    title: 'Misclick on a closed job',
+    blurb: 'Backend Developer is closed and Jane is at Offer. A recruiter rejects her by mistake. How do we undo it?',
+    watch: 'The mistake is undone with one Reactivate — no need to reopen the job, so nobody new can apply in the meantime. Jane returns to Offer and the job stays Closed.',
+    setup: [{ type: 'create', candidate: 'jane', job: 'backend' }, ...toStage(1, 4), { type: 'close', job: 'backend' }],
+    steps: [
+      { label: 'Recruiter A rejects Jane by mistake (note: "x")', action: mv('A', 1, 'reject', 'x'), expect: 'ok' },
+      { label: 'Recruiter B (screen still says Offer) also clicks Reject', action: mv('B', 1, 'reject', 'Duplicate click'), expect: 'refused' },
+      { label: 'Recruiter A reactivates Jane (note: "Misclick — restoring")', action: mv('A', 1, 'reactivate', 'Misclick — restoring'), expect: 'ok' },
+      { label: 'Add Priya to the still-closed job', action: { type: 'create', candidate: 'priya', job: 'backend' }, expect: 'refused' },
+    ],
+  },
+];
+
+/* ===================== LOGIC-END ===================== */
+
+// ---------- Page shell (DOM only from here) ----------
+const KIND_LABEL = { advance: 'Advance', back: 'Back', reject: 'Reject', withdraw: 'Withdraw', reactivate: 'Reactivate' };
+let world = Sim.fresh();
+let mode = 'free';        // 'free' or a scenario index
+let progress = 0;
+let stepResults = [];
+let last = null;
+let showAll = false;
+let pending = null;        // {screen, app, kind} while a note form is open
+
+const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const pill = (stage) => `<span class="pill ${stage.replace(' ', '')}">${esc(stage)}</span>`;
+
+function perform(action) {
+  const r = Sim.step(world, action);
+  world = r.world;
+  last = r;
+  pending = null;
+  return r;
+}
+
+function selectMode(m) {
+  mode = m;
+  progress = 0;
+  stepResults = [];
+  last = null;
+  pending = null;
+  world = Sim.fresh(m === 'free' ? [] : SCENARIOS[m].setup);
+  render();
+}
+
+function runStep() {
+  const sc = SCENARIOS[mode];
+  const st = sc.steps[progress];
+  const r = perform(st.action);
+  stepResults[progress] = { outcome: r.outcome, expect: st.expect, message: r.message };
+  progress++;
+  render();
+}
+
+function clickAction(screen, app, kind) {
+  if (['reject', 'withdraw', 'reactivate'].includes(kind)) { pending = { screen, app, kind }; render(); return; }
+  perform({ type: 'move', screen, app, kind });
+  render();
+}
+
+function confirmNote(screen, app, kind) {
+  const note = $(`note-${screen}-${app}`).value;
+  perform({ type: 'move', screen, app, kind, note });
+  render();
+}
+
+function render() {
+  renderTabs();
+  renderControls();
+  renderBanner();
+  renderScreen('A');
+  renderScreen('B');
+  renderRecords();
+}
+
+function renderTabs() {
+  $('tabs').innerHTML =
+    `<button class="tab ${mode === 'free' ? 'on' : ''}" onclick="selectMode('free')">Free play</button>` +
+    SCENARIOS.map((s, i) => `<button class="tab ${mode === i ? 'on' : ''}" onclick="selectMode(${i})">${i + 1}. ${esc(s.title)}</button>`).join('');
+}
+
+function renderControls() {
+  const S = world.S;
+  if (mode === 'free') {
+    const candOpts = Object.entries(S.candidates).map(([k, c]) => `<option value="${k}">${esc(c.name)}</option>`).join('');
+    const jobOpts = Object.entries(S.jobs).map(([k, j]) => `<option value="${k}">${esc(j.title)}</option>`).join('');
+    $('controls').innerHTML = `
+      <h2>Free play</h2>
+      <p class="muted">Add applications, then use the buttons on either recruiter's screen below. Screens only update when that recruiter acts or reloads — just like a real browser tab.</p>
+      <h3>Add an application (as Recruiter A)</h3>
+      <div class="row">
+        <select id="newCand">${candOpts}</select> for <select id="newJob">${jobOpts}</select>
+        <button class="act primary" onclick="perform({type:'create', screen:'A', candidate:$('newCand').value, job:$('newJob').value}); render()">Add application</button>
+      </div>
+      <h3>Candidates</h3>
+      <div class="row">${Object.entries(S.candidates).map(([k, c]) => c.archived
+        ? `<button class="act" onclick="perform({type:'restore', candidate:'${k}'}); render()">Restore ${esc(c.name)}</button>`
+        : `<button class="act" onclick="perform({type:'archive', candidate:'${k}'}); render()">Archive ${esc(c.name)}</button>`).join('')}</div>
+      <h3>Jobs</h3>
+      <div class="row">${Object.entries(S.jobs).map(([k, j]) => j.status === 'Open'
+        ? `<button class="act" onclick="perform({type:'close', job:'${k}'}); render()">Close ${esc(j.title)}</button>`
+        : `<button class="act" onclick="perform({type:'reopen', job:'${k}'}); render()">Reopen ${esc(j.title)}</button>`).join('')}</div>
+      <h3>Options</h3>
+      <label class="toggle"><input type="checkbox" ${showAll ? 'checked' : ''} onchange="showAll=this.checked; render()">
+        Also show buttons the rules would hide (dashed) — click them to see the system refuse</label>`;
+    return;
+  }
+  const sc = SCENARIOS[mode];
+  $('controls').innerHTML = `
+    <h2>${mode + 1}. ${esc(sc.title)}</h2>
+    <p>${esc(sc.blurb)}</p>
+    <div class="watch"><strong>Watch for:</strong> ${esc(sc.watch)}</div>
+    <ol class="steps">${sc.steps.map((st, i) => {
+      const res = stepResults[i];
+      let resHtml = '';
+      if (res) {
+        const good = res.outcome === res.expect;
+        const word = { ok: 'Allowed', refused: 'Refused', 'first-only': 'First click allowed, second refused', both: 'Both clicks allowed', neither: 'Neither click allowed' }[res.outcome];
+        resHtml = `<div class="res"><span class="verdict ${good ? 'good' : 'badv'}">${word} — ${good ? 'as the rules say' : 'UNEXPECTED'}</span>\n${esc(res.message)}</div>`;
+      }
+      return `<li class="${res ? 'done' : ''}"><div>
+        <button class="act ${i === progress ? 'primary' : ''}" ${i === progress ? '' : 'disabled'} onclick="runStep()">${esc(st.label)}</button>${resHtml}
+      </div></li>`;
+    }).join('')}</ol>
+    <div class="row" style="margin-top:12px"><button class="act" onclick="selectMode(${mode})">Restart this walkthrough</button></div>`;
+}
+
+function renderBanner() {
+  if (!last) {
+    $('banner').innerHTML = `<div class="banner idle">${mode === 'free' ? 'Nothing has happened yet — add an application to begin.' : 'Ready. Click the highlighted step to start.'}</div>`;
+    return;
+  }
+  $('banner').innerHTML = `<div class="banner ${last.ok ? 'ok' : 'bad'}"><b>${last.ok ? 'Done' : 'Refused'}</b>${esc(last.message)}</div>`;
+}
+
+function renderScreen(screen) {
+  const S = world.S;
+  const shown = world.screens[screen];
+  const ids = Object.keys(S.applications).map(Number);
+  const interactive = mode === 'free';
+  const cards = ids.map((id) => {
+    const app = S.applications[id];
+    const shownStage = shown[id] ?? app.stage;
+    const cand = S.candidates[app.candidate];
+    const job = S.jobs[app.job];
+    const tags = [cand.archived ? '<span class="pill flag">candidate archived</span>' : '', job.status === 'Closed' ? '<span class="pill flag">job closed</span>' : ''].join(' ');
+    const stale = shownStage !== app.stage
+      ? `<div class="stale">Out of date — this screen hasn't reloaded. (The system now says ${esc(app.stage)}.)</div>` : '';
+    const acts = Rules.actionsFor(S, id, shownStage).filter((a) => showAll || !a.blocked);
+    const btns = acts.map((a) => {
+      const label = a.blocked ? KIND_LABEL[a.kind] : `${KIND_LABEL[a.kind]}${a.to && !['reject', 'withdraw'].includes(a.kind) ? ` → ${a.to}` : ''}`;
+      return `<button class="act ${a.blocked ? 'blocked' : ''}" title="${esc(a.blocked || '')}" ${interactive ? '' : 'disabled'}
+        onclick="clickAction('${screen}', ${id}, '${a.kind}')">${esc(label)}</button>`;
+    }).join('');
+    const canDouble = interactive && acts.some((a) => a.kind === 'advance' && !a.blocked);
+    const dbl = canDouble ? `<button class="act" title="Sends the same Advance twice, as a fast double-click would"
+      onclick="perform({type:'doubleClick', screen:'${screen}', app:${id}, kind:'advance'}); render()">Double-click Advance</button>` : '';
+    let form = '';
+    if (pending && pending.screen === screen && pending.app === id) {
+      form = `<div class="noteform"><div class="lbl">${KIND_LABEL[pending.kind]} — why? (required)</div>
+        <div class="row"><input type="text" id="note-${screen}-${id}" placeholder="Explain the reason">
+        <button class="act primary" onclick="confirmNote('${screen}', ${id}, '${pending.kind}')">Confirm</button>
+        <button class="act" onclick="pending=null; render()">Cancel</button></div></div>`;
+    }
+    return `<div class="card"><div class="who">${esc(cand.name)} → ${esc(job.title)}</div>
+      <div class="row" style="margin-top:4px">${pill(shownStage)} ${tags}</div>${stale}
+      <div class="actions row">${btns || '<span class="muted">No actions available</span>'} ${dbl}</div>${form}</div>`;
+  }).join('');
+  $(`screen${screen}`).innerHTML = `<h2>Recruiter ${screen}'s screen
+      <button class="act" ${interactive ? '' : 'disabled'} onclick="perform({type:'refresh', screen:'${screen}'}); render()">Reload page</button></h2>
+    ${cards || '<p class="muted">No applications yet.</p>'}`;
+}
+
+function renderRecords() {
+  const S = world.S;
+  const ch = new Set(last ? last.changed : []);
+  const cands = Object.entries(S.candidates).map(([k, c]) => `
+    <tr class="${ch.has(`cand:${k}`) ? 'changed' : ''}"><td>${esc(c.name)}</td>
+    <td>${c.archived ? '<span class="pill flag">Archived</span>' : '<span class="pill plain">Active</span>'}</td>
+    <td>${Rules.activeApps(S, 'candidate', k).length}</td>
+    <td>${Rules.hiredApps(S, 'candidate', k).map((a) => esc(S.jobs[a.job].title)).join(', ') || '<span class="muted">—</span>'}</td></tr>`).join('');
+  const jobs = Object.entries(S.jobs).map(([k, j]) => {
+    const active = Rules.activeApps(S, 'job', k).length;
+    return `<tr class="${ch.has(`job:${k}`) ? 'changed' : ''}"><td>${esc(j.title)}</td>
+      <td>${j.status === 'Closed' ? '<span class="pill flag">Closed</span>' : '<span class="pill plain">Open</span>'}
+        ${j.status === 'Closed' && active ? `<span class="muted"> · ${active} still in progress</span>` : ''}</td>
+      <td>${active}</td><td>${Rules.hiredApps(S, 'job', k).length}</td></tr>`;
+  }).join('');
+  const apps = Object.values(S.applications).map((a) => `
+    <tr class="${ch.has(`app:${a.id}`) ? 'changed' : ''}"><td>#${a.id}</td><td>${esc(S.candidates[a.candidate].name)}</td>
+    <td>${esc(S.jobs[a.job].title)}</td><td>${pill(a.stage)}</td></tr>`).join('');
+  const hist = S.history.map((h, i) => `
+    <tr class="${ch.has(`hist:${i}`) ? 'changed' : ''}"><td>${h.step}</td><td>#${h.app} ${esc(Rules.appName(S, h.app))}</td>
+    <td>${h.from ? pill(h.from) : '<span class="muted">(new)</span>'} → ${pill(h.to)}</td>
+    <td>${esc(h.by)}</td><td>${h.note ? esc(h.note) : '<span class="muted">—</span>'}</td></tr>`).join('');
+  $('records').innerHTML = `
+    <h2>What the system has recorded</h2>
+    <p class="muted">The real data, whatever each screen shows. Highlighted rows changed in the last action.</p>
+    <div class="grid2">
+      <div><h3>Candidates</h3><table><tr><th>Name</th><th>Status</th><th>Active applications</th><th>Hired for</th></tr>${cands}</table></div>
+      <div><h3>Jobs</h3><table><tr><th>Job</th><th>Status</th><th>Active applications</th><th>Hired</th></tr>${jobs}</table></div>
+    </div>
+    <h3>Applications</h3>
+    ${apps ? `<table><tr><th>#</th><th>Candidate</th><th>Job</th><th>Current stage</th></tr>${apps}</table>` : '<p class="muted">None yet.</p>'}
+    <h3>Stage history (oldest first — every successful move adds exactly one line)</h3>
+    ${hist ? `<table><tr><th>Step</th><th>Application</th><th>Change</th><th>By</th><th>Note</th></tr>${hist}</table>` : '<p class="muted">Empty.</p>'}`;
+}
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATS Dashboard Variants (Prototype)</title>
+<!--
+  THROWAWAY UI PROTOTYPE — not production code.
+  Question: which dashboard layout should become the ATS's UI convention?
+  Same content and data in every variant; only the structure differs.
+  Switch variants with the dark bar at the bottom, or the ← / → keys.
+-->
+<link href="https://cdn.jsdelivr.net/npm/daisyui@5.0.0" rel="stylesheet" type="text/css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.0.0"></script>
+<style>
+  body { padding-bottom: 88px; }
+  /* Variant switcher: deliberately NOT DaisyUI so it never looks like part of a design. */
+  #switcher { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 1000;
+    display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 999px;
+    background: #111418; color: #f2f4f7; box-shadow: 0 6px 24px rgba(0,0,0,.35);
+    font: 13px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; max-width: calc(100vw - 32px); }
+  #switcher button { background: #2a2f37; color: #f2f4f7; border: 0; border-radius: 999px; width: 34px; height: 34px;
+    font: inherit; font-size: 16px; cursor: pointer; flex: 0 0 auto; }
+  #switcher button:hover { background: #3b424d; }
+  #switcher .lbl { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #switcher .lbl b { color: #8fb3ff; }
+</style>
+</head>
+<body class="bg-base-200">
+
+<div id="app"></div>
+
+<!-- Shared: filtered application list (what a pipeline count links to) -->
+<dialog id="stageModal" class="modal">
+  <div class="modal-box max-w-2xl">
+    <h3 class="font-bold text-lg" id="stageTitle"></h3>
+    <p class="text-xs font-mono text-base-content/60 mt-1" id="stageUrl"></p>
+    <div class="overflow-x-auto mt-4"><table class="table table-sm"><thead><tr><th>Candidate</th><th>Job opening</th><th>Job status</th></tr></thead><tbody id="stageRows"></tbody></table></div>
+    <div class="modal-action"><form method="dialog"><button class="btn btn-sm">Close</button></form></div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<div id="toast" class="toast toast-top toast-end z-[900]"></div>
+
+<div id="switcher" role="group" aria-label="Prototype variant switcher">
+  <button type="button" onclick="go(-1)" aria-label="Previous variant">←</button>
+  <span class="lbl" id="switchLabel"></span>
+  <button type="button" onclick="go(1)" aria-label="Next variant">→</button>
+</div>
+
+<script>
+// ---------------- Shared sample data (same for every variant) ----------------
+const STAGES = ['Applied', 'Screening', 'Interview', 'Final Review', 'Offer'];
+const JOBS = {
+  1: { id: 1, title: 'Backend Developer',      dept: 'Engineering', status: 'Open',   type: 'Full-time', mode: 'Hybrid' },
+  2: { id: 2, title: 'Data Analyst',           dept: 'Analytics',   status: 'Open',   type: 'Full-time', mode: 'Remote' },
+  3: { id: 3, title: 'Product Designer',       dept: 'Design',      status: 'Closed', type: 'Full-time', mode: 'On-site' },
+  4: { id: 4, title: 'IT Support Specialist',  dept: 'IT',          status: 'Closed', type: 'Contract',  mode: 'On-site' },
+  5: { id: 5, title: 'Marketing Coordinator',  dept: 'Marketing',   status: 'Open',   type: 'Part-time', mode: 'Hybrid' },
+  6: { id: 6, title: 'HR Generalist',          dept: 'People',      status: 'Closed', type: 'Full-time', mode: 'On-site' },
+  7: { id: 7, title: 'Sales Development Rep',  dept: 'Sales',       status: 'Open',   type: 'Full-time', mode: 'Remote' },
+};
+const APPS = [
+  ['Ava Thompson', 1, 'Applied'], ['Noah Patel', 1, 'Applied'], ['Mia Rodriguez', 2, 'Applied'], ['Liam Chen', 5, 'Applied'],
+  ['Sofia Nguyen', 7, 'Applied'], ['Ethan Brooks', 7, 'Applied'], ['Zoe Kim', 2, 'Applied'], ['Lucas Rivera', 5, 'Applied'],
+  ['Isabella Ortiz', 1, 'Screening'], ['Mason Lee', 2, 'Screening'], ['Harper Wilson', 3, 'Screening'], ['Elijah Davis', 7, 'Screening'],
+  ['Amelia Clark', 5, 'Screening'], ['James Wright', 1, 'Screening'],
+  ['Charlotte Hall', 1, 'Interview'], ['Benjamin Young', 3, 'Interview'], ['Evelyn King', 2, 'Interview'], ['Henry Scott', 4, 'Interview'], ['Aria Green', 7, 'Interview'],
+  ['Jack Adams', 1, 'Final Review'], ['Luna Baker', 2, 'Final Review'], ['Daniel Turner', 5, 'Final Review'],
+  ['Grace Hill', 1, 'Offer'], ['Samuel Moore', 3, 'Offer'], ['Chloe Allen', 7, 'Offer'],
+  ['Owen Carter', 6, 'Hired'], ['Lily Evans', 6, 'Hired'], ['Leo Mitchell', 4, 'Hired'], ['Ella Perez', 2, 'Hired'],
+  ['Wyatt Roberts', 1, 'Rejected'], ['Nora Phillips', 3, 'Rejected'], ['Jacob Campbell', 4, 'Rejected'], ['Hazel Parker', 5, 'Rejected'], ['Caleb Edwards', 2, 'Rejected'],
+  ['Stella Collins', 1, 'Withdrawn'], ['Julian Stewart', 7, 'Withdrawn'],
+].map(([name, job, stage], i) => ({ id: i + 1, name, job, stage }));
+const byName = (n) => APPS.find((a) => a.name === n);
+// The 10 most recent StageChange records, newest first (consistent with the current stages above).
+const ACTIVITY = [
+  ['Today, 10:42',     'Morgan Reyes', 'Grace Hill',     'Final Review', 'Offer', ''],
+  ['Today, 10:15',     'Priya Desai',  'Chloe Allen',    'Final Review', 'Offer', ''],
+  ['Today, 9:30',      'Morgan Reyes', 'Wyatt Roberts',  'Interview',    'Rejected', 'Strong frontend skills, limited backend depth'],
+  ['Yesterday, 4:05',  'Priya Desai',  'Ella Perez',     'Offer',        'Hired', ''],
+  ['Yesterday, 2:20',  'Morgan Reyes', 'Charlotte Hall', 'Screening',    'Interview', ''],
+  ['Yesterday, 11:02', 'Alex Kim',     'Samuel Moore',   'Final Review', 'Offer', ''],
+  ['Yesterday, 9:47',  'Priya Desai',  'Julian Stewart', 'Screening',    'Withdrawn', 'Accepted another offer'],
+  ['Mon, 3:30',        'Morgan Reyes', 'Daniel Turner',  'Interview',    'Final Review', ''],
+  ['Mon, 1:12',        'Priya Desai',  'Ava Thompson',   null,           'Applied', ''],
+  ['Mon, 10:08',       'Morgan Reyes', 'Evelyn King',    'Rejected',     'Interview', 'Hiring manager wants a second look'],
+].map(([when, by, name, from, to, note]) => ({ when, by, app: byName(name), from, to, note }));
+
+// Derived numbers — the same queries the Django views would run.
+const active = APPS.filter((a) => STAGES.includes(a.stage));
+const countAt = (s) => APPS.filter((a) => a.stage === s).length;
+const openJobs = Object.values(JOBS).filter((j) => j.status === 'Open');
+const totalHires = countAt('Hired');
+const closedWithActive = Object.values(JOBS).filter((j) => j.status === 'Closed')
+  .map((job) => ({ job, apps: active.filter((a) => a.job === job.id) })).filter((x) => x.apps.length);
+const offers = APPS.filter((a) => a.stage === 'Offer');
+const maxStage = Math.max(...STAGES.map(countAt));
+const slug = (s) => s.toLowerCase().replace(' ', '_');
+const job = (a) => JOBS[a.job];
+const ME = { name: 'Morgan Reyes', role: 'Recruiter' };
+
+// ---------------- Shared helpers ----------------
+const stageBadge = (s) => {
+  const cls = s === 'Hired' ? 'badge-success' : s === 'Rejected' || s === 'Withdrawn' ? 'badge-ghost' : s === 'Offer' ? 'badge-warning' : 'badge-primary badge-soft';
+  return `<span class="badge badge-sm ${cls} whitespace-nowrap">${s}</span>`;
+};
+const closedBadge = (j) => j.status === 'Closed' ? `<span class="badge badge-sm badge-neutral badge-outline">Job closed</span>` : '';
+const change = (e) => `${e.from ? stageBadge(e.from) : '<span class="text-xs text-base-content/50">new</span>'}<span class="mx-1 text-base-content/40">→</span>${stageBadge(e.to)}`;
+const NAV = [['Dashboard', '/'], ['Candidates', '/candidates/'], ['Job openings', '/jobs/'], ['Applications', '/applications/']];
+const ADMIN_NAV = [['Skills', '/skills/'], ['Staff accounts', '/staff/']];
+
+function stub(url, what = 'open') {
+  const el = document.createElement('div');
+  el.className = 'alert alert-info text-sm py-2';
+  el.innerHTML = `<span>Prototype — would ${what} <code class="font-mono">${url}</code></span>`;
+  document.getElementById('toast').appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+function openStage(s) {
+  const rows = APPS.filter((a) => a.stage === s);
+  document.getElementById('stageTitle').textContent = `Applications at ${s} (${rows.length})`;
+  document.getElementById('stageUrl').textContent = `/applications/?stage=${slug(s)}  — includes open and closed jobs`;
+  document.getElementById('stageRows').innerHTML = rows.map((a) =>
+    `<tr><td class="font-medium">${a.name}</td><td>${job(a).title}</td><td>${job(a).status === 'Closed' ? '<span class="badge badge-sm badge-neutral badge-outline">Closed</span>' : '<span class="badge badge-sm badge-ghost">Open</span>'}</td></tr>`).join('');
+  document.getElementById('stageModal').showModal();
+}
+
+// ---------------- Variant A: Sidebar command center ----------------
+function variantA() {
+  const navLink = ([label, url], on) => `<li><a class="${on ? 'menu-active' : ''}" onclick="stub('${url}')">${label}</a></li>`;
+  return `
+<div class="drawer lg:drawer-open">
+  <input id="navA" type="checkbox" class="drawer-toggle">
+  <div class="drawer-content min-h-screen bg-base-200">
+    <div class="navbar bg-base-100 border-b border-base-300 lg:hidden">
+      <label for="navA" class="btn btn-ghost btn-sm" aria-label="Open menu">☰</label>
+      <span class="font-semibold ml-2">Applicant Tracking</span>
+    </div>
+    <main class="p-4 md:p-8 max-w-6xl space-y-6">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div><h1 class="text-2xl font-bold">Dashboard</h1><p class="text-sm text-base-content/60">Tuesday, October 27</p></div>
+        <div class="flex gap-2">
+          <button class="btn btn-sm" onclick="stub('/candidates/new/')">Add candidate</button>
+          <button class="btn btn-sm btn-primary" onclick="stub('/applications/new/')">New application</button>
+        </div>
+      </div>
+
+      <div class="stats stats-vertical sm:stats-horizontal shadow-sm bg-base-100 w-full">
+        <div class="stat"><div class="stat-title">Open job openings</div><div class="stat-value">${openJobs.length}</div><div class="stat-desc">${Object.keys(JOBS).length - openJobs.length} closed</div></div>
+        <div class="stat"><div class="stat-title">Active applications</div><div class="stat-value text-primary">${active.length}</div><div class="stat-desc">Includes closed jobs</div></div>
+        <div class="stat"><div class="stat-title">Total hires</div><div class="stat-value">${totalHires}</div><div class="stat-desc">All time</div></div>
+      </div>
+
+      <section class="card bg-base-100 shadow-sm"><div class="card-body">
+        <h2 class="card-title">Hiring pipeline</h2>
+        <p class="text-sm text-base-content/60 -mt-1">Active applications by stage, on open and closed jobs.</p>
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-2">
+          ${STAGES.map((s) => `
+          <button class="text-left rounded-box border border-base-300 p-4 hover:border-primary transition-colors" onclick="openStage('${s}')">
+            <div class="text-sm text-base-content/70">${s}</div>
+            <div class="text-3xl font-bold my-1">${countAt(s)}</div>
+            <progress class="progress progress-primary w-full" value="${countAt(s)}" max="${maxStage}"></progress>
+            <div class="text-xs text-primary mt-2">View list →</div>
+          </button>`).join('')}
+        </div>
+      </div></section>
+
+      <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <section class="card bg-base-100 shadow-sm lg:col-span-2"><div class="card-body">
+          <h2 class="card-title">Needs attention <span class="badge badge-warning badge-sm">${closedWithActive.length + offers.length}</span></h2>
+          <h3 class="text-xs uppercase tracking-wide text-base-content/60 mt-2">Closed jobs with active applications</h3>
+          <ul class="divide-y divide-base-300">
+            ${closedWithActive.map((x) => `
+            <li class="py-2 flex items-center justify-between gap-2">
+              <div><div class="font-medium">${x.job.title}</div><div class="text-xs text-base-content/60">${x.apps.length} still in progress</div></div>
+              <button class="btn btn-xs" onclick="stub('/jobs/${x.job.id}/')">Review</button>
+            </li>`).join('')}
+          </ul>
+          <h3 class="text-xs uppercase tracking-wide text-base-content/60 mt-3">Applications at Offer</h3>
+          <ul class="divide-y divide-base-300">
+            ${offers.map((a) => `
+            <li class="py-2 flex items-center justify-between gap-2">
+              <div><div class="font-medium">${a.name}</div><div class="text-xs text-base-content/60 flex flex-wrap gap-1 items-center">${job(a).title} ${closedBadge(job(a))}</div></div>
+              <button class="btn btn-xs" onclick="stub('/applications/${a.id}/')">Open</button>
+            </li>`).join('')}
+          </ul>
+        </div></section>
+
+        <section class="card bg-base-100 shadow-sm lg:col-span-3"><div class="card-body">
+          <h2 class="card-title">Recent activity</h2>
+          <div class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead><tr><th>When</th><th>Application</th><th>Change</th><th class="hidden md:table-cell">By</th></tr></thead>
+              <tbody>
+                ${ACTIVITY.map((e) => `
+                <tr class="hover:bg-base-200 cursor-pointer" onclick="stub('/applications/${e.app.id}/')">
+                  <td class="whitespace-nowrap text-xs text-base-content/60">${e.when}</td>
+                  <td><div class="font-medium">${e.app.name}</div><div class="text-xs text-base-content/60">${job(e.app).title}</div>${e.note ? `<div class="text-xs italic text-base-content/60 mt-1">“${e.note}”</div>` : ''}</td>
+                  <td class="whitespace-nowrap">${change(e)}</td>
+                  <td class="hidden md:table-cell text-sm">${e.by}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div></section>
+      </div>
+    </main>
+  </div>
+  <div class="drawer-side z-40">
+    <label for="navA" class="drawer-overlay" aria-label="Close menu"></label>
+    <aside class="bg-base-100 border-r border-base-300 w-64 min-h-full p-4 flex flex-col">
+      <div class="font-bold text-lg px-2 mb-4">Applicant Tracking</div>
+      <ul class="menu w-full p-0">
+        ${NAV.map((n, i) => navLink(n, i === 0)).join('')}
+        <li class="menu-title mt-4">Admin</li>
+        ${ADMIN_NAV.map((n) => navLink(n, false)).join('')}
+      </ul>
+      <div class="mt-auto flex items-center gap-3 px-2 pt-4 border-t border-base-300">
+        <div class="avatar avatar-placeholder"><div class="bg-neutral text-neutral-content w-9 rounded-full"><span class="text-xs">MR</span></div></div>
+        <div class="text-sm"><div class="font-medium">${ME.name}</div><div class="text-base-content/60 text-xs">${ME.role}</div></div>
+      </div>
+    </aside>
+  </div>
+</div>`;
+}
+
+// ---------------- Variant B: Pipeline board ----------------
+let activityOpen = false;
+function variantB() {
+  const card = (a) => `
+    <button class="w-full text-left bg-base-100 rounded-box p-3 shadow-xs border ${a.stage === 'Offer' ? 'border-warning' : 'border-base-300'} hover:border-primary" onclick="stub('/applications/${a.id}/')">
+      <div class="font-medium text-sm">${a.name}</div>
+      <div class="text-xs text-base-content/60">${job(a).title}</div>
+      <div class="flex flex-wrap gap-1 mt-2">${closedBadge(job(a))}${a.stage === 'Offer' ? '<span class="badge badge-sm badge-warning">Awaiting decision</span>' : ''}</div>
+    </button>`;
+  return `
+<div class="min-h-screen bg-base-200">
+  <div class="navbar bg-base-100 shadow-sm px-4 gap-2">
+    <div class="flex-1 flex items-center gap-4">
+      <span class="font-bold">Applicant Tracking</span>
+      <ul class="menu menu-horizontal menu-sm p-0 hidden md:flex">
+        ${NAV.map(([l, u], i) => `<li><a class="${i === 0 ? 'menu-active' : ''}" onclick="stub('${u}')">${l === 'Dashboard' ? 'Pipeline' : l}</a></li>`).join('')}
+        <li><details><summary>Admin</summary><ul class="bg-base-100 rounded-box z-30 w-40">${ADMIN_NAV.map(([l, u]) => `<li><a onclick="stub('${u}')">${l}</a></li>`).join('')}</ul></details></li>
+      </ul>
+    </div>
+    <button class="btn btn-sm btn-ghost" onclick="activityOpen=!activityOpen; render()">Recent activity <span class="badge badge-sm">${ACTIVITY.length}</span></button>
+    <button class="btn btn-sm btn-primary" onclick="stub('/applications/new/')">New application</button>
+  </div>
+
+  <main class="p-4 md:p-6 space-y-4 ${activityOpen ? 'xl:mr-96' : ''}">
+    <div class="flex flex-wrap items-center gap-3">
+      <h1 class="text-2xl font-bold mr-2">Pipeline</h1>
+      <span class="badge badge-lg badge-ghost">${openJobs.length} open jobs</span>
+      <span class="badge badge-lg badge-primary badge-soft">${active.length} active applications</span>
+      <span class="badge badge-lg badge-success badge-soft">${totalHires} hired</span>
+    </div>
+
+    <div role="alert" class="alert alert-warning alert-soft">
+      <div>
+        <div class="font-semibold">${closedWithActive.length} closed jobs still have ${closedWithActive.reduce((n, x) => n + x.apps.length, 0)} active applications</div>
+        <div class="text-sm">${closedWithActive.map((x) => `<a class="link" onclick="stub('/jobs/${x.job.id}/')">${x.job.title}</a> (${x.apps.length})`).join(' · ')}</div>
+      </div>
+    </div>
+
+    <div class="flex gap-3 overflow-x-auto pb-2">
+      ${STAGES.map((s) => {
+        const apps = APPS.filter((a) => a.stage === s);
+        return `
+        <section class="flex-1 min-w-56 bg-base-300/40 rounded-box p-3 flex flex-col gap-2">
+          <header class="flex items-center justify-between px-1">
+            <h2 class="font-semibold text-sm">${s}</h2>
+            <span class="badge badge-sm ${s === 'Offer' ? 'badge-warning' : ''}">${apps.length}</span>
+          </header>
+          ${apps.slice(0, 4).map(card).join('')}
+          <button class="btn btn-ghost btn-xs mt-auto" onclick="openStage('${s}')">View all ${apps.length} →</button>
+        </section>`;
+      }).join('')}
+    </div>
+  </main>
+
+  ${activityOpen ? `
+  <aside class="fixed top-0 right-0 h-full w-full sm:w-96 bg-base-100 shadow-xl z-50 flex flex-col">
+    <div class="flex items-center justify-between p-4 border-b border-base-300">
+      <h2 class="font-semibold">Recent activity</h2>
+      <button class="btn btn-sm btn-ghost" onclick="activityOpen=false; render()" aria-label="Close">✕</button>
+    </div>
+    <ul class="timeline timeline-vertical timeline-compact overflow-y-auto p-4">
+      ${ACTIVITY.map((e, i) => `
+      <li>
+        ${i ? '<hr>' : ''}
+        <div class="timeline-middle"><span class="block w-2 h-2 rounded-full bg-primary"></span></div>
+        <div class="timeline-end mb-4 ml-2">
+          <div class="text-xs text-base-content/60">${e.when} · ${e.by}</div>
+          <div class="font-medium text-sm">${e.app.name} <span class="text-base-content/60 font-normal">· ${job(e.app).title}</span></div>
+          <div class="mt-1">${change(e)}</div>
+          ${e.note ? `<div class="text-xs italic text-base-content/60 mt-1">“${e.note}”</div>` : ''}
+        </div>
+        ${i < ACTIVITY.length - 1 ? '<hr>' : ''}
+      </li>`).join('')}
+    </ul>
+  </aside>` : ''}
+</div>`;
+}
+
+// ---------------- Variant C: Inbox (list / detail) ----------------
+let cTab = 'attention';
+let cSel = 0;
+function cItems() {
+  if (cTab === 'attention') {
+    return [
+      ...closedWithActive.map((x) => ({ kind: 'closed', x })),
+      ...offers.map((a) => ({ kind: 'offer', a })),
+    ];
+  }
+  return ACTIVITY.map((e) => ({ kind: 'activity', e }));
+}
+function cRow(it, i) {
+  const on = i === cSel;
+  let title, sub, tag;
+  if (it.kind === 'closed') { title = it.x.job.title; sub = `${it.x.apps.length} active application${it.x.apps.length > 1 ? 's' : ''}`; tag = '<span class="badge badge-sm badge-neutral badge-outline">Closed job</span>'; }
+  if (it.kind === 'offer') { title = it.a.name; sub = job(it.a).title; tag = stageBadge('Offer'); }
+  if (it.kind === 'activity') { title = it.e.app.name; sub = `${it.e.when} · ${it.e.by}`; tag = stageBadge(it.e.to); }
+  return `<li><button class="w-full text-left px-4 py-3 border-b border-base-300 flex items-start justify-between gap-3 ${on ? 'bg-primary/10 border-l-4 border-l-primary' : 'hover:bg-base-200'}" onclick="cSel=${i}; render()">
+    <div class="min-w-0"><div class="font-medium truncate">${title}</div><div class="text-xs text-base-content/60 truncate">${sub}</div></div>${tag}</button></li>`;
+}
+function cDetail(it) {
+  if (!it) return '<p class="text-base-content/60">Nothing selected.</p>';
+  if (it.kind === 'closed') {
+    const j = it.x.job;
+    return `
+      <div class="flex flex-wrap items-center gap-2"><h2 class="text-xl font-bold">${j.title}</h2><span class="badge badge-neutral badge-outline">Closed</span></div>
+      <p class="text-sm text-base-content/60">${j.dept} · ${j.type} · ${j.mode}</p>
+      <p class="mt-4">This job is closed to new applicants, but ${it.x.apps.length} application${it.x.apps.length > 1 ? 's are' : ' is'} still moving through the pipeline.</p>
+      <table class="table table-sm mt-3"><thead><tr><th>Candidate</th><th>Stage</th></tr></thead><tbody>
+        ${it.x.apps.map((a) => `<tr><td><a class="link link-hover" onclick="stub('/applications/${a.id}/')">${a.name}</a></td><td>${stageBadge(a.stage)}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="flex flex-wrap gap-2 mt-4">
+        <button class="btn btn-sm" onclick="stub('/jobs/${j.id}/')">Open job</button>
+        <button class="btn btn-sm btn-ghost" onclick="stub('/jobs/${j.id}/reopen/', 'POST to')">Reopen job</button>
+      </div>`;
+  }
+  if (it.kind === 'offer') {
+    const a = it.a;
+    const hist = ACTIVITY.filter((e) => e.app === a);
+    return `
+      <div class="flex flex-wrap items-center gap-2"><h2 class="text-xl font-bold">${a.name}</h2>${stageBadge(a.stage)}</div>
+      <p class="text-sm text-base-content/60 flex flex-wrap gap-2 items-center">${job(a).title} ${closedBadge(job(a))}</p>
+      <p class="mt-4">An offer is out. Record the outcome when you hear back.</p>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button class="btn btn-sm btn-success" onclick="stub('/applications/${a.id}/move/ (Offer → Hired)', 'HTMX POST to')">Advance → Hired</button>
+        <button class="btn btn-sm" onclick="stub('/applications/${a.id}/move/ (Offer → Final Review)', 'HTMX POST to')">Back</button>
+        <button class="btn btn-sm btn-ghost" onclick="stub('/applications/${a.id}/reject/ (note required)', 'open the inline form for')">Reject</button>
+        <button class="btn btn-sm btn-ghost" onclick="stub('/applications/${a.id}/withdraw/ (note required)', 'open the inline form for')">Withdraw</button>
+      </div>
+      <h3 class="text-xs uppercase tracking-wide text-base-content/60 mt-6 mb-2">Recent history</h3>
+      ${hist.length ? hist.map((e) => `<div class="text-sm py-1">${e.when} · ${e.by} · ${change(e)}</div>`).join('') : '<p class="text-sm text-base-content/60">No recent changes in the activity feed.</p>'}`;
+  }
+  const e = it.e;
+  return `
+    <div class="text-sm text-base-content/60">${e.when} · ${e.by}</div>
+    <h2 class="text-xl font-bold mt-1">${e.app.name}</h2>
+    <p class="text-sm text-base-content/60 flex flex-wrap gap-2 items-center">${job(e.app).title} ${closedBadge(job(e.app))}</p>
+    <div class="mt-4 text-lg">${change(e)}</div>
+    ${e.note ? `<blockquote class="mt-4 border-l-4 border-base-300 pl-3 italic">${e.note}</blockquote>` : '<p class="mt-4 text-sm text-base-content/60">No note.</p>'}
+    <div class="mt-4"><button class="btn btn-sm" onclick="stub('/applications/${e.app.id}/')">Open application</button></div>`;
+}
+function variantC() {
+  const items = cItems();
+  if (cSel >= items.length) cSel = 0;
+  const total = active.length;
+  return `
+<div class="min-h-screen bg-base-100">
+  <header class="border-b border-base-300">
+    <div class="max-w-6xl mx-auto px-4 flex flex-wrap items-center justify-between gap-2 py-3">
+      <span class="font-bold">Applicant Tracking</span>
+      <nav class="flex flex-wrap gap-1 text-sm">
+        ${[...NAV, ...ADMIN_NAV].map(([l, u], i) => `<a class="btn btn-ghost btn-sm ${i === 0 ? 'btn-active' : ''}" onclick="stub('${u}')">${l}</a>`).join('')}
+      </nav>
+      <span class="text-sm text-base-content/60">${ME.name} · ${ME.role}</span>
+    </div>
+  </header>
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <p class="text-lg">Good morning, Morgan. There are <b>${total}</b> active applications across <b>${openJobs.length}</b> open jobs, and <b>${totalHires}</b> hires to date.</p>
+
+    <div class="mt-5">
+      <div class="flex h-11 rounded-box overflow-hidden border border-base-300" role="list" aria-label="Pipeline">
+        ${STAGES.map((s, i) => `
+        <button role="listitem" class="flex items-center justify-center text-xs sm:text-sm font-medium hover:brightness-95 border-r border-base-100 last:border-r-0"
+          style="flex:${countAt(s)} 1 0; background: color-mix(in oklab, var(--color-primary) ${18 + i * 14}%, var(--color-base-100)); color: ${i >= 3 ? 'var(--color-primary-content)' : 'inherit'}"
+          onclick="openStage('${s}')" title="${s}: ${countAt(s)}">${countAt(s)}</button>`).join('')}
+      </div>
+      <div class="flex mt-1 text-xs text-base-content/60">
+        ${STAGES.map((s) => `<div style="flex:${countAt(s)} 1 0" class="truncate pr-1">${s}</div>`).join('')}
+      </div>
+    </div>
+
+    <div class="mt-6 grid md:grid-cols-[22rem_1fr] border border-base-300 rounded-box overflow-hidden">
+      <div class="border-b md:border-b-0 md:border-r border-base-300">
+        <div role="tablist" class="tabs tabs-border px-2 pt-1">
+          <a role="tab" class="tab ${cTab === 'attention' ? 'tab-active' : ''}" onclick="cTab='attention'; cSel=0; render()">Needs attention <span class="badge badge-sm badge-warning ml-2">${closedWithActive.length + offers.length}</span></a>
+          <a role="tab" class="tab ${cTab === 'activity' ? 'tab-active' : ''}" onclick="cTab='activity'; cSel=0; render()">Recent activity</a>
+        </div>
+        <ul class="max-h-[28rem] overflow-y-auto">${items.map(cRow).join('')}</ul>
+      </div>
+      <div class="p-5 md:p-6">${cDetail(items[cSel])}</div>
+    </div>
+  </main>
+</div>`;
+}
+
+// ---------------- Variant switcher ----------------
+const VARIANTS = [
+  { key: 'A', name: 'Sidebar command center', render: variantA },
+  { key: 'B', name: 'Pipeline board',         render: variantB },
+  { key: 'C', name: 'Inbox (list / detail)',  render: variantC },
+];
+let current = 0;
+try {
+  const fromHash = VARIANTS.findIndex((v) => `#${v.key}` === location.hash);
+  const saved = VARIANTS.findIndex((v) => v.key === localStorage.getItem('ats-dashboard-variant'));
+  current = fromHash >= 0 ? fromHash : saved >= 0 ? saved : 0;
+} catch (e) { /* storage unavailable — start at A */ }
+
+function render() {
+  const v = VARIANTS[current];
+  document.getElementById('app').innerHTML = v.render();
+  document.getElementById('switchLabel').innerHTML = `<b>${v.key}</b> · ${v.name} <span style="opacity:.6">(${current + 1}/${VARIANTS.length})</span>`;
+  document.title = `ATS Dashboard — ${v.key}: ${v.name} (Prototype)`;
+}
+function go(d) {
+  current = (current + d + VARIANTS.length) % VARIANTS.length;
+  try { localStorage.setItem('ats-dashboard-variant', VARIANTS[current].key); } catch (e) {}
+  history.replaceState(null, '', `#${VARIANTS[current].key}`);
+  window.scrollTo(0, 0);
+  render();
+}
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable)) return;
+  if (document.querySelector('dialog[open]')) return;
+  if (e.key === 'ArrowLeft') go(-1);
+  if (e.key === 'ArrowRight') go(1);
+});
+render();
+</script>
+</body>
+</html>
