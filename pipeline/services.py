@@ -11,6 +11,7 @@ from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from candidates.models import Candidate
+from candidates.services import candidate_is_archived, is_archived_guard_error
 from jobs.models import JobOpening, JobStatus
 from pipeline.models import (
     ACTIVE_STAGES,
@@ -131,7 +132,7 @@ def create_application(*, candidate, job_opening, created_by, notes=""):
             candidate = Candidate.objects.get(pk=candidate.pk)
             if job_opening.status != JobStatus.OPEN:
                 raise StageChangeRefused(JOB_CLOSED_MESSAGE)
-            if candidate.archived_at is not None:
+            if candidate_is_archived(candidate.pk):
                 raise StageChangeRefused(CANDIDATE_ARCHIVED_MESSAGE)
             if Application.objects.filter(candidate=candidate, job_opening=job_opening).exists():
                 raise StageChangeRefused(DUPLICATE_APPLICATION_MESSAGE)
@@ -152,7 +153,11 @@ def create_application(*, candidate, job_opening, created_by, notes=""):
                 changed_by=created_by,
                 changed_at=now,
             )
-    except IntegrityError:
+    except IntegrityError as error:
+        # The candidate was archived after the check above: the database guard refused the
+        # insert (see candidates.services).
+        if is_archived_guard_error(error):
+            raise StageChangeRefused(CANDIDATE_ARCHIVED_MESSAGE) from None
         # Two requests for the same pair at once: both checks passed, the unique constraint
         # refused the second insert, and the transaction rolled back.
         if Application.objects.filter(candidate=candidate, job_opening=job_opening).exists():
@@ -177,6 +182,19 @@ def change_stage(*, application, action, expected_stage, changed_by, note=""):
     Refreshes `application` in place and returns the StageChange written for this move;
     refusals raise StageChangeRefused and write nothing.
     """
+    try:
+        change = _change_stage(application, action, expected_stage, changed_by, note)
+    except IntegrityError as error:
+        # The candidate was archived after the Reactivate check: the database guard refused
+        # moving the application back into an active stage (see candidates.services).
+        if not is_archived_guard_error(error):
+            raise
+        raise StageChangeRefused(REACTIVATE_ARCHIVED_MESSAGE) from None
+    application.refresh_from_db()
+    return change
+
+
+def _change_stage(application, action, expected_stage, changed_by, note):
     with transaction.atomic():
         stage = current_stage(application.pk)
         if expected_stage != stage:
@@ -199,8 +217,7 @@ def change_stage(*, application, action, expected_stage, changed_by, note=""):
         note = note.strip()
         if action in NOTE_REQUIRED and not note:
             raise NoteRequired(NOTE_REQUIRED_MESSAGE.format(verb=action.label.lower()))
-        archived = Candidate.objects.filter(applications=application.pk, archived_at__isnull=False)
-        if action == Action.REACTIVATE and archived.exists():
+        if action == Action.REACTIVATE and candidate_is_archived(application.candidate_id):
             raise StageChangeRefused(REACTIVATE_ARCHIVED_MESSAGE)
 
         now = timezone.now()
@@ -220,5 +237,4 @@ def change_stage(*, application, action, expected_stage, changed_by, note=""):
             changed_at=now,
             note=note,
         )
-    application.refresh_from_db()
     return change

@@ -43,8 +43,10 @@ uv run python manage.py check
 - `core`: base layout (DaisyUI drawer in `templates/base.html`), role helpers (`core/roles.py`),
   the `roles` context processor, shared badge partials, the dashboard. Test helpers live in
   `core/tests/utils.py` (`make_recruiter`, `make_admin`).
-- `candidates`: Candidate (`/candidates/`, `/candidates/new/`, `/candidates/<pk>/`,
-  `/candidates/<pk>/edit/`); test helper `candidates.tests.utils.make_candidate`.
+- `candidates`: Candidate (`/candidates/`, `/candidates/archived/`, `/candidates/new/`,
+  `/candidates/<pk>/`, `/candidates/<pk>/edit/`, POST `/candidates/<pk>/archive/` and
+  `/restore/`) and `candidates/services.py` (`archive_candidate`, `restore_candidate`,
+  `candidate_is_archived`); test helper `candidates.tests.utils.make_candidate`.
 - `jobs`: JobOpening and Skill (`/jobs/`, `/jobs/new/`, `/jobs/<pk>/`, `/jobs/<pk>/edit/`,
   POST `/jobs/<pk>/close/` and `/jobs/<pk>/reopen/`, `/jobs/?skill=<pk>`; Admin-only `/skills/`,
   `/skills/new/`, `/skills/<pk>/edit/`, `/skills/<pk>/delete/`); test helpers `jobs.tests.utils.make_skill` and `make_job`.
@@ -99,6 +101,25 @@ uv run python manage.py check
   check catches an assignment committed by another request during the delete.
 - **HTMX:** the CSRF token is sent on every HTMX request through `hx-headers` on `<body>`. Stage
   actions and notes edits return partials when `HX-Request` is set.
+- **Archived candidates:** an archived candidate never has an active application. Archive is
+  refused while any application is active (the message lists them); Hired, Rejected and
+  Withdrawn don't block it. Archive and Restore touch only `archived_at` and `updated_at`, and a
+  repeated or stale one raises `CandidateStatusRefused`. The rule is held by the database:
+  - SQLite triggers (`pipeline/0004_archived_candidate_guards`) refuse inserting an application
+    for an archived candidate, moving one into an active stage, and archiving a candidate with
+    an active application. Their messages contain `ARCHIVED_GUARD`, which the services turn back
+    into their usual refusals.
+  - `DATABASES["default"]["OPTIONS"]["transaction_mode"] = "IMMEDIATE"`: every `atomic()`
+    takes the write lock at BEGIN, so concurrent check-then-write requests wait and then see
+    each other's commit instead of failing with "database is locked".
+    `candidates/tests/test_archive_concurrency.py` runs two real threads against a SQLite file
+    (via `concurrency_worker.py`) to prove it.
+  - Don't set `archived_at` directly in tests on a candidate with an active application: the
+    trigger refuses it.
+- **Edit forms save only their own fields** (`CandidateForm.save` uses `update_fields`): a full
+  `save()` writes back every column from the copy the request loaded, undoing an Archive,
+  Restore, Close or stage move committed in between. Follow this for any new edit form, such as
+  application notes. (The Phase 3 job edit form doesn't yet; see PROMPTS.md Entry 21.)
 - **Job status:** changes only through `jobs/services.py` (`close_job`, `reopen_job`): a
   conditional `UPDATE … WHERE status = <from>`, so a repeated or stale request raises
   `JobStatusUnchanged` ("already closed/open") and changes nothing. They never touch

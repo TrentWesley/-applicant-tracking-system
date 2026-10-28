@@ -5,13 +5,29 @@
 {% block content %}
 <div class="flex flex-wrap items-end justify-between gap-3">
   <div>
+    {% if candidate.archived_at %}
+    <a href="{% url 'candidates:candidate_archived_list' %}" class="link link-hover text-sm">← Archived candidates</a>
+    {% else %}
     <a href="{% url 'candidates:candidate_list' %}" class="link link-hover text-sm">← Candidates</a>
-    <h1 class="text-2xl font-bold">{{ candidate }}</h1>
+    {% endif %}
+    <h1 class="flex flex-wrap items-center gap-2 text-2xl font-bold">{{ candidate }}{% if candidate.archived_at %} <span class="badge badge-neutral">Archived</span>{% endif %}</h1>
   </div>
   {% if perms.candidates.change_candidate %}
-  <a href="{% url 'candidates:candidate_update' candidate.pk %}" class="btn btn-sm">Edit</a>
+  <div class="flex flex-wrap gap-2">
+    <a href="{% url 'candidates:candidate_update' candidate.pk %}" class="btn btn-sm">Edit</a>
+    {# Archive and Restore are the only way the archived state changes; each is a plain POST. #}
+    {% if candidate.archived_at %}
+    <form method="post" action="{% url 'candidates:candidate_restore' candidate.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm btn-primary">Restore candidate</button></form>
+    {% else %}
+    <form method="post" action="{% url 'candidates:candidate_archive' candidate.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm btn-outline">Archive candidate</button></form>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
+
+{% if candidate.archived_at %}
+<div class="alert alert-info" role="note">Archived on {{ candidate.archived_at|date:"M j, Y" }}. Archived candidates can't get new applications or have applications reactivated until they're restored.</div>
+{% endif %}
 
 <section class="card bg-base-100 shadow-sm" aria-labelledby="contact-heading">
   <div class="card-body">

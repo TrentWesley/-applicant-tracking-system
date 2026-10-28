@@ -19,6 +19,18 @@ class CandidateForm(DaisyUIFormMixin, forms.ModelForm):
         ]
         widgets = {"notes": forms.Textarea(attrs={"rows": 4})}
 
+    def save(self, commit=True):
+        # An edit writes only its own fields. Saving every column from the copy this request
+        # loaded would undo an Archive or Restore committed in between.
+        candidate = super().save(commit=False)
+        if commit:
+            if candidate._state.adding:
+                candidate.save()
+            else:
+                candidate.save(update_fields=[*self._meta.fields, "updated_at"])
+            self.save_m2m()
+        return candidate
+
     def clean_email(self):
         # The database constraint is the final guard; this puts the message on the email field.
         email = self.cleaned_data["email"]

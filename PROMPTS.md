@@ -1705,6 +1705,340 @@ not started.
 
 ---
 
+## Entry 20
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 8 implementation (Candidate archive and restore, with the archive/create race
+closed)
+
+**Prompt:**
+```
+/implement Implement Phase 8 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Follow the exact Phase 8 scope: add dedicated Archive and Restore actions
+for candidates; allow archiving only when the candidate has no active applications; treat
+Applied, Screening, Interview, Final Review, and Offer as active stages; allow archiving
+candidates whose applications are all Hired, Rejected, or Withdrawn, or who have no
+applications; archived candidates must remain in the database with their history preserved;
+exclude archived candidates from the default candidate list and new application choices; prevent
+new applications from being created for archived candidates, including through direct
+server-side requests; prevent reactivation of applications belonging to archived candidates;
+allow Restore to make an archived candidate active again without modifying their existing
+applications or stage history; display clear Archive/Restore controls and feedback with
+appropriate Recruiter and Admin permissions; handle repeated or stale Archive/Restore requests
+safely.
+
+IMPORTANT CONCURRENCY REQUIREMENT: Phase 4 identified a potential race between archiving a
+candidate and creating an application for that same candidate. Do not rely only on separate
+checks such as "no active applications" and "candidate is not archived." Design and implement a
+transactional solution that prevents a concurrent application-creation request from succeeding
+while the candidate is being archived, and prevents archiving from succeeding if a concurrent
+application has already been created. Use an approach compatible with SQLite and the existing
+Django architecture. Explain the database-level protection, add a meaningful concurrency
+regression test, and demonstrate that the test would fail if the protection were removed.
+
+Requirements: strict TDD (Red-Green-Refactor); write failing tests before implementing each
+feature; follow the exact Phase 8 user stories and acceptance criteria; preserve Phases 1–7; do
+not implement permanent candidate deletion (Phase 10); run the complete test suite, Ruff lint and
+format checks, Django system checks, and migration checks; update PROMPTS.md with the Phase 8
+implementation process, concurrency design, tests, and decisions; stop after Phase 8 for my
+review before committing or pushing. Do not begin Phase 9.
+```
+
+**Investigating the race first:**
+- **Setup:** the project's SQLite runs in rollback-journal mode, and Django opens deferred
+  transactions (`BEGIN`). A scratch script reproduced the race with two real connections to a
+  SQLite file: a "create" that read "not archived", paused, then inserted, while an "archive"
+  read "no active applications" during the pause, then set `archived_at`.
+- **With `BEGIN` (deferred):** the data stayed consistent, because SQLite allows one writer. But
+  the create failed with `database is locked` (a 500 error), because both transactions held read
+  locks and the first to try writing deadlocked.
+- **With `BEGIN IMMEDIATE`:** the archive waited for the create to commit, then read 1 active
+  application.
+- **Conclusion:** the checks themselves aren't enough; the database must serialize them and hold
+  the rule.
+
+**Concurrency design: two database-level layers:**
+1. **SQLite triggers** (`pipeline/migrations/0004_archived_candidate_guards.py`) hold the rule "an
+   archived candidate never has an active application" for every write, from any code path:
+   - `pipeline_application_insert_archived_guard`: refuses inserting an application for an
+     archived candidate;
+   - `pipeline_application_update_archived_guard`: refuses moving an application into an active
+     stage (or to another candidate) while its candidate is archived, which covers Reactivate;
+   - `candidates_candidate_archive_guard`: refuses setting `archived_at` while the candidate has
+     an active application.
+   
+   **Why this closes the race:** a trigger runs inside the writing statement, and SQLite has one
+   writer at a time, so the trigger always sees the latest committed rows. Of an archive and a
+   concurrent create or Reactivate, the second write is refused, whichever order the two
+   requests' checks ran in. Each message contains "archived-candidate guard"
+   (`candidates.services.ARCHIVED_GUARD`). `archive_candidate`, `create_application` and
+   `change_stage` catch that `IntegrityError` and turn it into their usual refusal ("…can't be
+   archived while they have active applications: …", "This candidate is archived and can't get
+   new applications.", "…can't be reactivated…").
+2. **`transaction_mode = "IMMEDIATE"`** in `DATABASES["default"]["OPTIONS"]` (Django ≥ 5.1).
+   Every `atomic()` takes SQLite's write lock at `BEGIN`, so the services' check-then-write
+   blocks run one after another. The second request waits (up to SQLite's 5-second busy timeout),
+   its checks see the first's commit, and it gets the friendly refusal instead of `database is
+   locked`.
+
+**How it was built (TDD):**
+1. **Red:** three new test files, plus a worker module:
+   - `candidates/tests/test_archive.py` (28 tests): the service, views, blocking, permissions, and
+     the lists and detail page;
+   - `candidates/tests/test_archive_guards.py` (10 tests): direct-write trigger tests,
+     interleaving tests and the transaction-mode setting;
+   - `candidates/tests/test_archive_concurrency.py` (2 tests), with `concurrency_worker.py`.
+   
+   All failed because `candidates.services` didn't exist.
+2. **Green:**
+   - **`candidates/services.py`:**
+     - `archive_candidate` lists the active applications and refuses if there are any.
+       Otherwise it runs a conditional `UPDATE … SET archived_at, updated_at WHERE archived_at IS
+       NULL`; a repeated or stale archive gets "This candidate is already archived, so nothing
+       was changed.".
+     - `restore_candidate` runs `UPDATE … WHERE archived_at IS NOT NULL`; a repeat gets "…already
+       active…".
+     - Shared helpers: `candidate_is_archived`, `active_applications` and
+       `is_archived_guard_error`.
+   - **Pipeline:** `create_application` and Reactivate in `change_stage` both use
+     `candidate_is_archived`, and turn a trigger refusal into their normal message. The move
+     logic moved into a private `_change_stage`, so `change_stage` can catch the `IntegrityError`
+     after the transaction rolls back.
+   - **Migration 0004** and the `transaction_mode` setting.
+   - **Views:**
+     - `CandidateArchiveView` and `CandidateRestoreView`: POST only (GET gets 405), and
+       `candidates.change_candidate` is required (403 otherwise). Each redirects to the
+       candidate with a success or error message.
+     - `ArchivedCandidateListView` at `/candidates/archived/` reuses `candidate_list.html`
+       (`show_archived`), with an Archived date column. The two lists link to each other.
+   - **Detail page:**
+     - "Archive candidate" or "Restore candidate", hidden without the change permission;
+     - an **Archived** badge, and an "Archived on … can't get new applications or have
+       applications reactivated" note;
+     - the back link goes to the archived list, and New application stays hidden (Phase 4).
+3. **Two problems found during Green:**
+   - **A Phase 6 test set up an impossible state.** `test_an_archived_candidate_can_still_be_rejected`
+     archived a candidate who had an Interview application, which the new guard refuses. Since
+     an archived candidate can no longer have an active application, Reject and Withdraw never
+     meet one, so the test was removed on purpose. Phase 6's decision 3 ("archived candidates
+     can still be rejected or withdrawn") is now moot.
+   - **My first archive-interleaving test was wrong.** It injected the competing create inside
+     the archive's own transaction, so the archive's rollback undid it too. All three
+     interleaving tests were rewritten: the other request's write is committed first, then
+     `stale_first_check` makes the service's first check return what it would have read just
+     before that commit.
+4. **Refactor:**
+   - nested `with` blocks were combined (Ruff SIM117);
+   - two redundant module imports were removed from the worker.
+
+**Tests (AC6–AC9, AC25 archived part, US 11–16):**
+- **Archive:**
+  - allowed with no applications, and with only Hired, Rejected or Withdrawn ones (Hired
+    included);
+  - refused for each of the five active stages, with the error listing them;
+  - a repeat or a stale page changes nothing;
+  - archive and restore change no application's stage, stage time or history, and the job's
+    hired count is unchanged.
+- **Blocked while archived:**
+  - new applications are refused through the service and through a direct POST, and the
+    create form doesn't offer the candidate;
+  - Reactivate is refused with no StageChange, and succeeds after Restore;
+  - new applications are allowed again after Restore.
+- **Database guard:** inserting an application, moving one into each active stage, and archiving
+  with an active application, all through plain ORM writes, raise the guard's `IntegrityError`.
+  Terminal moves and other candidate edits still work, and the trigger's stage list matches
+  `ACTIVE_STAGES`.
+- **Interleavings (deterministic):**
+  - a create whose check ran before an archive committed is refused, with nothing written;
+  - an archive whose check ran before a create committed is refused, naming "Late Job
+    (Applied)";
+  - a Reactivate whose check ran before an archive committed is refused, with no StageChange.
+- **Real concurrency** (`test_archive_concurrency.py`): a subprocess migrates a fresh SQLite
+  *file* with the project's settings (the test database is in-memory and shared between threads,
+  so it can't show file locking). It then runs two requests on two threads with separate
+  connections. The first pauses for 0.5 s inside its transaction, just after its guard check, and
+  the second runs during the pause.
+  - **Create in progress, then archive:** the create succeeds, and the archive is refused naming
+    "Data Analyst (Applied)". The candidate is not archived and has 1 application.
+  - **Archive in progress, then create:** the archive succeeds, and the create is refused with
+    "This candidate is archived…". The candidate is archived and has 0 applications.
+  
+  It passed 3 more times in a row (about 2 s each).
+- **Lists, permissions and pages:**
+  - the default list excludes archived candidates and links to the archived view, which lists
+    only them (with the Candidates nav still highlighted);
+  - Recruiter and Admin can archive and restore (AC2);
+  - view-only users get 403 and see no buttons, anonymous users are sent to login, and unknown
+    candidates get 404.
+
+**Showing that the tests fail without each protection:**
+- **Triggers removed** (migration 0004 made a no-op): 10 failures (counting subtests). They are
+  all three interleavings and the direct-write guard tests (insert, each of the five active
+  stages, archive). The real-thread test still passed, because IMMEDIATE alone serializes the
+  services.
+- **IMMEDIATE removed** (triggers kept): both real-thread scenarios failed. The request already
+  in progress died with `OperationalError: database is locked`, and the settings test failed too.
+- Both originals were restored and the full suite re-run.
+
+**Browser check:**
+- A throwaway server ran on scratch settings and a scratch database (deleted afterwards).
+- **Refused archive:** clicking the real "Archive candidate" for a candidate at Interview showed
+  "Ann Lee can't be archived while they have active applications: Data Analyst (Interview). Move
+  each one to Hired, Rejected or Withdrawn first."
+- **Successful archive:** archiving a candidate with no applications showed "Cy Park archived.",
+  the Archived badge, Restore, the note, a back link to Archived candidates, and no New
+  application button.
+
+**Verification:**
+- **429 of 429 tests pass:** 390 from Phases 1–7, plus 40 new, minus the one Phase 6 test
+  removed.
+- `ruff check` and `ruff format --check` are clean (102 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes.
+- **Local database:**
+  - the local `db.sqlite3` had no candidates, so no existing row broke the new rule;
+  - migration 0004 was applied to it, and `migrate --check` is clean;
+  - unapplying 0004 dropped the three triggers, and reapplying restored them.
+- **Not started, as planned:** permanent candidate deletion (Phase 10), and the job detail's
+  hired count (Phase 9).
+
+**Decisions to review:**
+- **Two database-level layers:** triggers hold the rule on every write, and IMMEDIATE
+  transactions serialize the services' checks.
+  - IMMEDIATE applies to every `atomic()` block in the app, so concurrent writes wait for each
+    other (up to 5 s) instead of failing. That's appropriate for a small staff app on SQLite.
+  - The triggers are SQLite-specific, like the Phase 4 history trigger.
+- **The Phase 6 "archived candidates can still be rejected" test was removed:** the state it set
+  up is now impossible.
+- **The archived view reuses the candidate list template** with a flag, rather than a second
+  template.
+- **Archive and Restore are single POST buttons** with no confirmation step, like Close and
+  Reopen. Each undoes the other and neither changes an application.
+
+---
+
+## Entry 21
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 8 approval, edit-form fix, final review, commit and push
+
+**Prompt:**
+```
+I approve Phase 8 and the implementation decisions. Before committing: review all Phase 8
+changes for leftover stubs, duplicate code, accidental changes, and formatting issues; confirm
+that archiving is refused whenever a candidate has an active application and that Restore
+preserves all existing application data and history; confirm that archived candidates cannot
+receive new applications or have applications reactivated; review the SQLite triggers and BEGIN
+IMMEDIATE transaction setting to ensure they correctly protect the archive/create race without
+breaking earlier functionality; confirm that the Phase 6 test removal is justified and that the
+new tests cover the intended behavior; confirm the concurrency regression tests pass and that
+removing the database protections causes the expected failures; confirm migration 0004 applies
+and reverses cleanly; confirm no credentials, local database files, generated CSS, or build
+artifacts are included; run the complete automated test suite, Ruff lint and format checks,
+Django system checks, and migration checks; update PROMPTS.md with my approval, the
+implementation decisions, concurrency explanation, and final verification results. Commit with
+the message "Phase 8: candidate archive and restore". Push to the existing GitHub main branch.
+Report the final test count, commit hash, push status, and remaining issues. Do not begin
+Phase 9 yet.
+```
+
+**Approved decisions:**
+1. **Two database-level protections:**
+   - SQLite triggers hold "an archived candidate never has an active application" on every write;
+   - `transaction_mode = "IMMEDIATE"` serializes the services' check-then-write transactions
+     app-wide, so concurrent requests wait (up to SQLite's 5-second busy timeout) instead of
+     failing with `database is locked`.
+2. **The Phase 6 test removed,** "an archived candidate can still be rejected": the state it set
+   up can no longer exist.
+3. **The archived view reuses `candidate_list.html`** with a `show_archived` flag.
+4. **Archive and Restore are single POST buttons** with no confirmation step.
+
+**Concurrency explanation (as approved):**
+- **The race:** a create checks "candidate not archived" and an archive checks "no active
+  applications". Each check can pass before the other request's write commits.
+- **Without IMMEDIATE:** SQLite's single writer kept the data consistent, but the request already
+  in progress failed with `database is locked`.
+- **With IMMEDIATE:** each transaction takes the write lock at `BEGIN`, so the second request
+  waits, re-checks against the committed result and gets its normal refusal.
+- **The triggers:** they run inside the writing statement and always see the latest committed
+  rows, so they refuse the second conflicting write from any code path. That holds even if a
+  check ran outside a transaction or against stale data. The services turn the trigger's
+  `IntegrityError` back into their normal messages.
+
+**Fix found during the review: the candidate edit form could undo an Archive or Restore**
+- **The problem:** checking the triggers against earlier features showed that Phase 2's edit form
+  saved every column, including `archived_at`, from the copy the edit request loaded. The
+  update view's read and save aren't one transaction, so an Archive committed in between was
+  silently undone. If the candidate was restored and given a new application in between, the
+  trigger refused the stale write and the edit crashed with a 500 error.
+- **Red:** `EditDoesNotOverwriteArchivedStateTests` (2 tests) load the edit's copy, commit an
+  Archive (or a Restore plus a new application), then post the edit. One failed with the archive
+  undone; the other errored with the guard's `IntegrityError`.
+- **Green:** `CandidateForm.save()` now saves an existing candidate with
+  `update_fields=[the form's fields, "updated_at"]`. New candidates are saved normally. All
+  earlier create and edit tests still pass.
+- **Recorded in CLAUDE.md:** edit forms save only their own fields. Phase 9's application notes
+  edit must do the same, or it could undo a stage move.
+
+**Final review:**
+- **No leftovers:** no stubs, TODOs or debug output, and no duplicate code. The worker's
+  `print()` is its deliberate output to the test. Changes are limited to the candidates app,
+  `pipeline/services.py`, migration 0004, the one removed Phase 6 test, the setting, `CLAUDE.md`
+  and `PROMPTS.md`.
+- **Archive refused while active, Restore safe:**
+  - tests refuse archiving for each of the five active stages, with the applications listed;
+  - archiving is allowed with only Hired, Rejected or Withdrawn applications, or none;
+  - Archive then Restore leaves every application's stage, stage time and history count, the
+    total StageChange count, and the job's hired count unchanged.
+- **Archived candidates blocked:** new applications are refused through the service, a direct
+  POST and the form's choices; Reactivate is refused with no StageChange until Restore. The
+  triggers back these up for writes that skip the services.
+- **Earlier features still work:**
+  - the triggers fire only on application inserts, on `stage` or `candidate_id` updates that
+    move an archived candidate's application into an active stage, and on setting `archived_at`
+    while an application is active;
+  - terminal moves and ordinary candidate edits are unaffected (tested);
+  - IMMEDIATE changes only when the write lock is taken;
+  - every Phase 1–7 test passes, plus the edit-form fix above.
+- **Phase 6 test removal:** the removed test archived a candidate who had an Interview
+  application, a state the guard now refuses, so it tested nothing that can happen. The
+  replacement coverage is the trigger test refusing that archive, and the service and view tests
+  refusing it with the list.
+- **Concurrency tests:** the real two-thread test passes (and passed 3 more times in a row
+  earlier). Re-running the mutations for this review:
+  - **triggers removed:** 10 failures in the guard and interleaving tests;
+  - **IMMEDIATE removed:** both two-thread scenarios failed with `OperationalError: database is
+    locked`, and the settings test errored.
+  
+  Both were restored and confirmed with `git diff`.
+- **Migration 0004:** unapplied (triggers dropped, only the Phase 4 trigger left) and reapplied
+  cleanly on the local database; `migrate --check` is clean.
+- **Nothing sensitive or generated:** `db.sqlite3`, `assets/css/tailwind.css`, `.env`, `.venv` and
+  `.django_tailwind_cli` are gitignored and none is in the change set. A scan found no
+  credentials.
+
+**Final verification:**
+- **431 of 431 tests pass:** 390 from Phases 1–7, plus 42 new, minus the one Phase 6 test
+  removed.
+- `ruff check` and `ruff format --check` are clean (102 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Remaining issues:**
+- **Phase 3 job edit form, not changed here:** it has the same lost-update pattern. An edit saved
+  from a copy loaded before a Close would quietly reopen the job (no trigger is involved, so it
+  doesn't error). The fix is the same `update_fields` save, with a regression test. It was left
+  for the user to approve, since it changes approved Phase 3 and 7 code.
+- **Timing:** the two-thread test relies on a 0.5-second pause and takes about 2 seconds.
+
+**Result:** committed as "Phase 8: candidate archive and restore" and pushed to `main`. Phase 9
+not started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

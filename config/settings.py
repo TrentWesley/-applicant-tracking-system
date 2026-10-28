@@ -85,6 +85,10 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
+        # Each transaction takes SQLite's write lock at BEGIN, so concurrent requests run their
+        # check-then-write one after another: the second waits and sees the first's commit,
+        # rather than failing with "database is locked".
+        "OPTIONS": {"transaction_mode": "IMMEDIATE"},
     }
 }
 

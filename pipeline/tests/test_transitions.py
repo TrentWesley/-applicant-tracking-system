@@ -197,13 +197,6 @@ class ExitMoveTests(TransitionTestCase):
         self.move(application, Action.WITHDRAW, note="  Took another offer.\n")
         self.assertEqual(application.stage_changes.last().note, "Took another offer.")
 
-    def test_an_archived_candidate_can_still_be_rejected(self):
-        # The archived-candidate guard is for Reactivate only.
-        application = make_application(stage=Stage.INTERVIEW)
-        Candidate.objects.filter(pk=application.candidate_id).update(archived_at=timezone.now())
-        self.move(application, Action.REJECT, note=NOTE)
-        self.assertEqual(application.stage, Stage.REJECTED)
-
 
 class ReactivateTests(TransitionTestCase):
     def exit_then_reactivate(self, application, exit_action, note="Brought back."):
