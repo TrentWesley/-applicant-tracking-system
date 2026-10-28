@@ -1,7 +1,7 @@
 from django import forms
 
 from candidates.models import Candidate
-from core.forms import DaisyUIFormMixin
+from core.forms import DaisyUIFormMixin, SaveOnlyFormFieldsMixin
 from jobs.models import JobOpening, JobStatus
 from pipeline.models import Application
 
@@ -35,3 +35,14 @@ class ApplicationForm(DaisyUIFormMixin, forms.ModelForm):
         job.queryset = JobOpening.objects.filter(status=JobStatus.OPEN)
         job.label_from_instance = lambda j: f"{j} ({j.department})" if j.department else str(j)
         job.error_messages["invalid_choice"] = CLOSED_JOB_CHOICE_MESSAGE
+
+
+class ApplicationNotesForm(SaveOnlyFormFieldsMixin, DaisyUIFormMixin, forms.ModelForm):
+    """General notes only; saving never touches the stage (see SaveOnlyFormFieldsMixin)."""
+
+    class Meta:
+        model = Application
+        fields = ["notes"]
+        labels = {"notes": "General notes"}
+        widgets = {"notes": forms.Textarea(attrs={"rows": 4})}
+        help_texts = {"notes": "Saving notes doesn't change the stage or its history."}

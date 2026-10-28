@@ -1,0 +1,22 @@
+<section id="notes-card" class="card bg-base-100 shadow-sm" aria-labelledby="notes-heading">
+  <div class="card-body">
+    <h2 id="notes-heading" class="card-title">Notes</h2>
+    {% if feedback %}
+    {# Focused after an HTMX swap, so the result is announced. #}
+    <div class="alert {% if feedback.ok %}alert-success{% else %}alert-error{% endif %}" role="{% if feedback.ok %}status{% else %}alert{% endif %}" tabindex="-1" autofocus>{{ feedback.text }}</div>
+    {% endif %}
+    {% if perms.pipeline.change_application %}
+    {# Writes only the notes column: the stage, its time and the history are never touched. #}
+    {% url 'pipeline:application_notes' application.pk as notes_url %}
+    <form method="post" action="{{ notes_url }}" hx-post="{{ notes_url }}" hx-target="#notes-card" hx-swap="outerHTML" hx-disabled-elt="find button" class="flex flex-col gap-3">
+      {% csrf_token %}
+      {% include "core/_field.html" with field=notes_form.notes %}
+      <div><button type="submit" class="btn btn-sm btn-primary">Save notes</button></div>
+    </form>
+    {% elif application.notes %}
+    {{ application.notes|linebreaks }}
+    {% else %}
+    <p class="text-base-content/70">No notes.</p>
+    {% endif %}
+  </div>
+</section>

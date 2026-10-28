@@ -13,4 +13,5 @@ urlpatterns = [
         views.ApplicationTransitionView.as_view(),
         name="application_transition",
     ),
+    path("<int:pk>/notes/", views.ApplicationNotesView.as_view(), name="application_notes"),
 ]

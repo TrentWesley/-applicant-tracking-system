@@ -2115,6 +2115,221 @@ JobStatus.OPEN`.
 
 ---
 
+## Entry 23
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 9 implementation (Edit application notes)
+
+**Prompt:**
+```
+/implement Implement Phase 9 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Review the existing application detail page, pipeline models, stage history,
+and the shared SaveOnlyFormFieldsMixin. Follow the exact Phase 9 user stories, acceptance
+criteria, and scope defined in the approved documents. Pay particular attention to: implementing
+application notes editing independently of hiring-stage transitions; ensuring notes edits never
+modify the application's stage, stage timestamp, or immutable StageChange history; using the
+existing SaveOnlyFormFieldsMixin, or an equally safe targeted update, to prevent stale form
+submissions from overwriting concurrent stage changes; preserving existing permissions,
+server-side validation, HTMX behavior, and non-JavaScript functionality; implementing any
+application-detail summaries or hired-count requirements explicitly assigned to Phase 9 in the
+approved plan; avoiding unrelated changes or features assigned to later phases. Requirements:
+strict TDD (Red-Green-Refactor); write failing tests before implementing each feature; include
+regression tests for notes edits occurring after a concurrent hiring-stage change; preserve all
+functionality from Phases 1–8 and the Job Edit regression fix; run the complete automated test
+suite, Ruff lint and format checks, Django system checks, and migration checks; update PROMPTS.md
+with the implementation process, decisions, tests, and results; do not commit or push until I
+review and approve Phase 9. Do not begin Phase 10.
+```
+
+**Scope check:**
+- **Phase 9 is notes editing only** (US 49, AC34).
+- **The hired count, the job page's applications list and "Hired for…"** are assigned to
+  **Phase 13** ("Badges, detail-page summaries and final check"), not Phase 9.
+- **Correction:** earlier reports (Entries 18 and 19 and the Phase 7 summaries) wrongly called
+  them Phase 9 items. They were left for Phase 13.
+
+**Result:**
+Claude Code built Phase 9 in one Red-Green cycle.
+
+1. **Red:** `pipeline/tests/test_notes.py` (14 tests), plus one deliberate update to a Phase 4
+   test. Phase 4's "no URL edits stage history" test now expects the new
+   `pipeline:application_notes` route. It still fails if any route name mentions "stage" or
+   "history".
+   - The new tests errored with `NoReverseMatch`, plus a missing `ApplicationNotesView`.
+2. **Green:**
+   - **`ApplicationNotesForm`** (`pipeline/forms.py`): only `notes`, labelled "General notes", with
+     help text "Saving notes doesn't change the stage or its history." It uses
+     `SaveOnlyFormFieldsMixin`, so an edit is `UPDATE … SET notes WHERE id`. It never names
+     `stage` or `stage_changed_at`, and never fires the Phase 8 stage trigger.
+   - **`SaveOnlyFormFieldsMixin` fix:** it always added `updated_at` to `update_fields`, but
+     Application has no such column. It now adds it only when the model has one.
+   - **`ApplicationNotesView`** at POST `/applications/<pk>/notes/` (the plan's URL):
+     - an `UpdateView` that accepts only POST (GET gets 405), and requires
+       `pipeline.change_application` (403 otherwise);
+     - with HTMX it returns `pipeline/_notes_card.html` with "Notes saved." (`role="status"`,
+       autofocused so it's announced);
+     - without HTMX it redirects to the detail page with the same message;
+     - it never calls the stage-change service.
+   - **Notes card:** `pipeline/_notes_card.html` (`id="notes-card"`) replaces the read-only
+     Notes section.
+     - Users with the change permission get the labelled textarea (through `core/_field.html`)
+       and "Save notes". The form posts with `action` (no-JavaScript fallback) and `hx-post`,
+       with `hx-target="#notes-card"` and `hx-disabled-elt`.
+     - Everyone else sees the notes as read-only text.
+   - **Detail view:** adds `notes_form` to the page context.
+3. **One Phase 5 test adjusted:** it counted `hx-disabled-elt` across the whole detail page, and
+   the notes form adds one. It now counts within the stage card, which is what it meant to check.
+4. **Mutation check:** removing the mixin from `ApplicationNotesForm` (a plain full `save()`) made
+   both stale-form regression tests fail. One undid the concurrent move (`'screening' !=
+   INTERVIEW`); the other crashed on the archived-candidate guard. The original was restored.
+
+**Tests (AC34, AC30, US 49):**
+- **Only notes change:** an HTMX edit returns the notes partial (no `<html>`, no layout) with
+  "Notes saved.". The stage, `stage_changed_at`, candidate, job, creator, `created_at` and every
+  StageChange field (from, to, by, when, note) are unchanged.
+- **Clearing:** notes can be cleared.
+- **Other fields ignored:** posted `stage`, `stage_changed_at`, `candidate`, `job_opening` and
+  `created_by` are ignored.
+- **Without HTMX:** redirects to the detail page with the message, and the textarea shows the
+  new notes.
+- **Always editable:** notes can be edited on a Rejected application of an archived candidate on
+  a closed job, and on a Hired application. Hired is permanent for the stage only.
+- **Stale-form regressions:**
+  - **advance:** the notes request loaded the application at Screening, then another request
+    advanced it to Interview. After the save, the stage is still Interview, its time still
+    matches the latest StageChange, there are 3 entries, and the notes are saved;
+  - **reject and archive:** another request rejected it and archived the candidate. The save
+    succeeds and the application stays Rejected.
+- **Permissions:**
+  - Recruiter and Admin can edit;
+  - a view-only user gets 403 with nothing changed, and sees the notes as text with no form or
+    notes URL;
+  - an anonymous user is sent to login; GET gets 405; an unknown application gets 404.
+- **The page:** the detail page has a labelled form (`<label for="id_notes">`) posting with and
+  without HTMX. The stage history section has no form or textarea, and shows its notes as text.
+
+**Browser check:**
+- A throwaway server ran on scratch settings and a scratch database (deleted afterwards). The
+  Tailwind CSS was rebuilt (gitignored output).
+- Headless Chrome typed into the real textarea and clicked "Save notes". The notes card swapped
+  in place (still one sidebar, URL unchanged), showed "Notes saved." with focus on it, and the
+  stage (Interview) and history (3 rows) were unchanged.
+
+**Verification:**
+- **448 of 448 tests pass:** 434 before, plus 14 new.
+- `ruff check` and `ruff format --check` are clean (103 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` and `migrate --check` are clean. No migration was needed.
+- **CLAUDE.md:** lists the notes URL, the notes card convention and `ApplicationNotesForm` under
+  the edit-form rule. Three lines this work had pushed past the file's wrap width were
+  re-wrapped, including one left over from Phase 7.
+- **Not started, as planned:** Admin permanent deletes (Phase 10); staff management (Phase 11);
+  the dashboard (Phase 12); badges, the hired count and "Hired for…" (Phase 13).
+
+**Decisions to review:**
+- **The notes form is always visible** on the detail page for users who can edit, rather than
+  behind an "Edit notes" button. It's one field, so an extra step adds little.
+- **Two people editing notes at once:** the last save wins. Notes have no stale check, unlike
+  stage moves. Only the notes text is affected, never the stage or history.
+- **Saving notes doesn't change the application's "Stage changed" time or ordering.** The
+  application list stays ordered by stage changes.
+
+---
+
+## Entry 24
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 9 approval, final review, commit and push
+
+**Prompt:**
+```
+I approve Phase 9 and all three implementation decisions. Before committing: review all Phase 9
+changes for leftover stubs, duplicate code, accidental changes, and formatting issues; confirm
+that ApplicationNotesForm saves only the notes field and cannot overwrite the application's
+stage, stage_changed_at, or immutable StageChange history; confirm that the updated
+SaveOnlyFormFieldsMixin still works correctly for CandidateForm and JobOpeningForm, including
+models with and without updated_at; confirm that Recruiter and Admin permissions, view-only
+access, HTMX updates, and non-JavaScript form submissions work correctly; confirm that the two
+modified earlier tests were adjusted appropriately without weakening their original intent;
+confirm that the hired count, job applications list, and related summaries remain assigned to
+Phase 13; confirm no credentials, local database files, generated CSS, or build artifacts are
+included; run the complete automated test suite, Ruff lint and format checks, Django system
+checks, and migration checks; update PROMPTS.md with my approval, the implementation decisions,
+and final verification results. Commit with the message "Phase 9: edit application notes". Push
+to the existing GitHub main branch. Report the final test count, commit hash, push status, and
+any remaining issues. Do not begin Phase 10 yet.
+```
+
+**Approved decisions:**
+1. The notes form is always visible on the detail page for users who can edit, with no separate
+   "Edit notes" step.
+2. Concurrent notes edits: the last save wins for the notes text, with no stale check. The stage
+   and history are never affected.
+3. Saving notes doesn't change the application's "Stage changed" time or the list ordering.
+
+**Final review:**
+- **No leftovers:** no stubs, TODOs or debug output, and no duplicate code. The notes partial is
+  shared by the detail page and the HTMX response. Changes are limited to the notes form, view,
+  URL and partial; the mixin's `updated_at` check; the two adjusted tests; the new tests;
+  `CLAUDE.md` and `PROMPTS.md`.
+- **One formatting fix:** Ruff had wrapped the adjusted Phase 5 assertion around a trailing
+  comment. The comment now sits on its own line above it.
+- **ApplicationNotesForm writes only `notes`:**
+  - `test_notes.py` shows that the stage, `stage_changed_at`, candidate, job, creator,
+    `created_at` and every StageChange field are identical after a save, including when other
+    fields are posted;
+  - the two stale-form regression tests show that a concurrent advance, or a reject plus an
+    archive, survives a notes save;
+  - removing the mixin made both fail.
+- **Coverage added for the mixin across all three forms:** `core/tests/test_forms.py` (4 tests)
+  captures the SQL each edit runs and checks the columns its `UPDATE` sets:
+  - `CandidateForm`: its 8 fields plus `updated_at`, never `archived_at`. `updated_at` advances.
+  - `JobOpeningForm`: its 6 columns plus `updated_at`, never `status`. The many-to-many `skills`
+    is still saved.
+  - `ApplicationNotesForm`: only `notes` (Application has no `updated_at`).
+  - **New rows:** a create still INSERTs every field.
+  
+  These tests passed as soon as they were written, because they cover existing behaviour rather
+  than new code. A mutation (removing the mixin from `JobOpeningForm`) made the job test fail on
+  the extra `status` and `created_at` columns. It was restored, with no diff from the committed
+  file.
+- **Permissions, HTMX and no-JavaScript:** passing tests cover:
+  - Recruiter and Admin edits;
+  - view-only users (403, nothing changed, read-only text and no form);
+  - anonymous users (login redirect), GET (405) and unknown applications (404);
+  - the HTMX partial;
+  - the plain POST redirect with its message.
+  
+  The headless-Chrome check confirmed the in-place swap.
+- **The two adjusted earlier tests:**
+  - **Phase 4 (`NoStageChangeScreensTests`):** it still lists every `pipeline:` route exactly,
+    now including `application_notes`, and still fails on any route name containing "stage" or
+    "history". It still guarantees no route edits stage history.
+  - **Phase 5 (`test_buttons_name_the_destination_and_post_with_htmx`):** it still requires
+    exactly two `hx-disabled-elt` move forms. It now counts within the stage card instead of the
+    whole page, because the notes form added a third on the page. Every other assertion is
+    unchanged.
+- **Phase 13 scope confirmed:** the plan's Phase 13 implementation tasks list "Hired for…" on
+  the candidate page, and the job page's applications list, active count and hired count. None
+  of these were built here.
+- **Nothing sensitive or generated:** `db.sqlite3`, `assets/css/tailwind.css`, `.env`, `.venv` and
+  `.django_tailwind_cli` are gitignored and none is in the change set. A scan found no
+  credentials.
+
+**Final verification:**
+- **452 of 452 tests pass:** 434 before Phase 9, plus 14 notes tests and 4 mixin tests.
+- `ruff check` and `ruff format --check` are clean (104 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Result:** committed as "Phase 9: edit application notes" and pushed to `main`. Phase 10 not
+started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

@@ -6,11 +6,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
 from django.utils.functional import cached_property
 from django.views import View
-from django.views.generic import CreateView, DetailView, ListView
+from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from candidates.models import Candidate
 from core.views import StaffPermissionMixin
-from pipeline.forms import ApplicationForm
+from pipeline.forms import ApplicationForm, ApplicationNotesForm
 from pipeline.models import Application, Stage
 from pipeline.services import (
     NoteRequired,
@@ -115,7 +115,8 @@ class ApplicationDetailView(StaffPermissionMixin, DetailView):
             confirm=self.request.GET.get("confirm", ""),
             focus=self.request.GET.get("focus", ""),
         )
-        return super().get_context_data(**card, **kwargs)
+        notes_form = ApplicationNotesForm(instance=self.object)
+        return super().get_context_data(**card, notes_form=notes_form, **kwargs)
 
     def get(self, request, *args, **kwargs):
         response = super().get(request, *args, **kwargs)
@@ -164,3 +165,32 @@ class ApplicationTransitionView(StaffPermissionMixin, View):
         if confirm:
             return redirect(f"{application.get_absolute_url()}?confirm={confirm}")
         return redirect(application)
+
+
+class ApplicationNotesView(StaffPermissionMixin, UpdateView):
+    """
+    POST the application's general notes. Only the notes column is written (the form saves with
+    update_fields), so the stage, its time and the history are never touched, even by a request
+    that loaded the application before another request moved it. With HTMX the notes card comes
+    back; without it, the detail page reloads.
+    """
+
+    permission_required = "pipeline.change_application"
+    http_method_names = ["post"]
+    model = Application
+    form_class = ApplicationNotesForm
+
+    def form_valid(self, form):
+        self.object = form.save()
+        return self.respond(form, Feedback(ok=True, text="Notes saved."))
+
+    def form_invalid(self, form):
+        return self.respond(form, Feedback(ok=False, text="The notes couldn't be saved."))
+
+    def respond(self, form, feedback):
+        if self.request.headers.get("HX-Request"):
+            context = {"application": self.object, "notes_form": form, "feedback": feedback}
+            return render(self.request, "pipeline/_notes_card.html", context)
+        level = messages.SUCCESS if feedback.ok else messages.ERROR
+        messages.add_message(self.request, level, feedback.text)
+        return redirect(self.object)

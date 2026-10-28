@@ -49,16 +49,18 @@ uv run python manage.py check
   `candidate_is_archived`); test helper `candidates.tests.utils.make_candidate`.
 - `jobs`: JobOpening and Skill (`/jobs/`, `/jobs/new/`, `/jobs/<pk>/`, `/jobs/<pk>/edit/`,
   POST `/jobs/<pk>/close/` and `/jobs/<pk>/reopen/`, `/jobs/?skill=<pk>`; Admin-only `/skills/`,
-  `/skills/new/`, `/skills/<pk>/edit/`, `/skills/<pk>/delete/`); test helpers `jobs.tests.utils.make_skill` and `make_job`.
+  `/skills/new/`, `/skills/<pk>/edit/`, `/skills/<pk>/delete/`); test helpers
+  `jobs.tests.utils.make_skill` and `make_job`.
 - `pipeline`: Application, StageChange and the single **stage-change service**
   (`pipeline/services.py`: `create_application`, and `change_stage` for Advance, Back, Reject,
   Withdraw and Reactivate). Pages:
   `/applications/` (`?stage=<value>`, lowercase stored values such as `final_review`),
   `/applications/new/` (`?candidate=<pk>` preselects an active candidate), `/applications/<pk>/`
   (`?confirm=<action>` opens the inline note form; with `HX-Request` it returns only the stage
-  card), POST `/applications/<pk>/transition/`. Test helper `pipeline.tests.utils.make_application`
-  (creates through the service with a unique candidate; a `stage=` argument is set directly as
-  test setup, so only the creation entry is in its history).
+  card), POST `/applications/<pk>/transition/` and `/applications/<pk>/notes/`. Test helper
+  `pipeline.tests.utils.make_application` (creates through the service with a unique candidate;
+  a `stage=` argument is set directly as test setup, so only the creation entry is in its
+  history).
 - `staff`: staff management over Django's built-in `User` (no custom user model).
 
 ## Conventions
@@ -117,10 +119,14 @@ uv run python manage.py check
   - Don't set `archived_at` directly in tests on a candidate with an active application: the
     trigger refuses it.
 - **Edit forms save only their own fields:** ModelForms mix in `core.forms.SaveOnlyFormFieldsMixin`
-  (`CandidateForm`, `JobOpeningForm`), which saves an existing row with `update_fields` (the
-  form's columns plus `updated_at`). A full `save()` writes back every column from the copy the
-  request loaded, undoing an Archive, Restore, Close, Reopen or stage move committed in between.
-  Use it for any new edit form, such as application notes.
+  (`CandidateForm`, `JobOpeningForm`, `ApplicationNotesForm`), which saves an existing row with
+  `update_fields` (the form's columns plus `updated_at` when the model has one). A full `save()`
+  writes back every column from the copy the request loaded, undoing an Archive, Restore, Close,
+  Reopen or stage move committed in between. Use it for any new edit form.
+- **Application notes:** `pipeline/_notes_card.html` (`id="notes-card"`) holds the notes form
+  for users with `pipeline.change_application` (read-only text otherwise). It posts to
+  `ApplicationNotesView` and is swapped in place with HTMX, or redirects back without it. It
+  never goes through the stage-change service, and StageChange notes stay read-only.
 - **Job status:** changes only through `jobs/services.py` (`close_job`, `reopen_job`): a
   conditional `UPDATE … WHERE status = <from>`, so a repeated or stale request raises
   `JobStatusUnchanged` ("already closed/open") and changes nothing. They never touch

@@ -282,7 +282,10 @@ class StageCardRenderingTests(TestCase):
         self.assertContains(response, f'action="{url}"', count=2)
         self.assertContains(response, f'hx-post="{url}"', count=2)
         self.assertContains(response, 'hx-target="#stage-card"', count=4)  # + Reject, Withdraw
-        self.assertContains(response, 'hx-disabled-elt="find button"', count=2)
+        html = response.content.decode()
+        card = html[html.index('id="stage-card"') : html.index('id="notes-card"')]
+        # Counted within the stage card: the notes form below has its own hx-disabled-elt.
+        self.assertEqual(card.count('hx-disabled-elt="find button"'), 2)
 
     def test_hired_card_explains_it_is_permanent(self):
         application = make_application(stage=Stage.HIRED)

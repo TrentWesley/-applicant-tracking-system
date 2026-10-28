@@ -24,12 +24,7 @@
   </div>
 </section>
 
-<section class="card bg-base-100 shadow-sm" aria-labelledby="notes-heading">
-  <div class="card-body">
-    <h2 id="notes-heading" class="card-title">Notes</h2>
-    {% if application.notes %}{{ application.notes|linebreaks }}{% else %}<p class="text-base-content/70">No notes.</p>{% endif %}
-  </div>
-</section>
+{% include "pipeline/_notes_card.html" %}
 
 {% include "pipeline/_stage_history.html" %}
 {% endblock %}

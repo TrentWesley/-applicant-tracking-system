@@ -23,8 +23,9 @@ class DaisyUIFormMixin:
 class SaveOnlyFormFieldsMixin:
     """
     For ModelForms that edit an existing row: save only the form's own columns (and
-    `updated_at`). A full save() writes back every column from the copy this request loaded,
-    undoing an Archive, Restore, Close or Reopen committed in between. New rows save normally.
+    `updated_at`, when the model has one). A full save() writes back every column from the copy
+    this request loaded, undoing an Archive, Restore, Close, Reopen or stage move committed in
+    between. New rows save normally.
     """
 
     def save(self, commit=True):
@@ -36,7 +37,9 @@ class SaveOnlyFormFieldsMixin:
                 # Many-to-many fields aren't columns; save_m2m() writes them below.
                 columns = {f.name for f in instance._meta.concrete_fields}
                 fields = [name for name in self._meta.fields if name in columns]
-                instance.save(update_fields=[*fields, "updated_at"])
+                if "updated_at" in columns:
+                    fields.append("updated_at")
+                instance.save(update_fields=fields)
             self.save_m2m()
         return instance
 
