@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Skills{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Skills</h1>
+    <p class="text-sm text-base-content/70">The skills recruiters can assign to job openings.</p>
+  </div>
+  <a href="{% url 'jobs:skill_create' %}" class="btn btn-primary btn-sm">Add skill</a>
+</div>
+
+<section class="card bg-base-100 shadow-sm">
+  <div class="card-body p-0">
+    {% if skills %}
+    <div class="overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr><th scope="col">Name</th><th scope="col">Used by</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          {% for skill in skills %}
+          <tr>
+            <td class="font-medium">{{ skill }}</td>
+            <td>
+              {% if skill.job_count %}
+              <a href="{% url 'jobs:job_list' %}?skill={{ skill.pk }}" class="link link-hover">{{ skill.job_count }} job{{ skill.job_count|pluralize }}</a>
+              {% else %}<span class="text-base-content/70">No jobs</span>{% endif %}
+            </td>
+            <td>
+              <div class="flex justify-end gap-2">
+                <a href="{% url 'jobs:skill_update' skill.pk %}" class="btn btn-xs">Rename<span class="sr-only"> {{ skill }}</span></a>
+                <a href="{% url 'jobs:skill_delete' skill.pk %}" class="btn btn-xs btn-outline btn-error">Delete<span class="sr-only"> {{ skill }}</span></a>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="p-6">No skills yet.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}{% if object %}Rename {{ object }}{% else %}Add skill{% endif %}{% endblock %}
+
+{% block content %}
+<div>
+  <a href="{% url 'jobs:skill_list' %}" class="link link-hover text-sm">← Skills</a>
+  <h1 class="text-2xl font-bold">{% if object %}Rename {{ object }}{% else %}Add skill{% endif %}</h1>
+  {% if object %}<p class="text-sm text-base-content/70">Jobs that use this skill keep it under the new name.</p>{% endif %}
+</div>
+
+<section class="card max-w-xl bg-base-100 shadow-sm">
+  <form method="post" class="card-body" novalidate>
+    {% csrf_token %}
+    {% include "core/_field.html" with field=form.name %}
+    <div class="card-actions mt-2">
+      <button type="submit" class="btn btn-primary">{% if object %}Save name{% else %}Add skill{% endif %}</button>
+      <a href="{% url 'jobs:skill_list' %}" class="btn btn-ghost">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

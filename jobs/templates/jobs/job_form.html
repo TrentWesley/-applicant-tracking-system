@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}{% if object %}Edit {{ object }}{% else %}Add job opening{% endif %}{% endblock %}
+
+{% block content %}
+<div>
+  {% if object %}
+  <a href="{{ object.get_absolute_url }}" class="link link-hover text-sm">← {{ object }}</a>
+  <h1 class="text-2xl font-bold">Edit {{ object }}</h1>
+  {% else %}
+  <a href="{% url 'jobs:job_list' %}" class="link link-hover text-sm">← Job Openings</a>
+  <h1 class="text-2xl font-bold">Add job opening</h1>
+  <p class="text-sm">New job openings start as Open.</p>
+  {% endif %}
+  <p class="text-sm text-base-content/70">Fields marked <span class="text-error">*</span> are required.</p>
+</div>
+
+<section class="card bg-base-100 shadow-sm">
+  <form method="post" class="card-body" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="alert alert-error" role="alert">
+      {% for error in form.non_field_errors %}<span>{{ error }}</span>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div class="sm:col-span-2">{% include "core/_field.html" with field=form.title %}</div>
+      {% include "core/_field.html" with field=form.department %}
+      {% include "core/_field.html" with field=form.location %}
+      {% include "core/_field.html" with field=form.employment_type %}
+      {% include "core/_field.html" with field=form.work_mode %}
+      <div class="sm:col-span-2">
+        {% include "core/_field.html" with field=form.skills %}
+        {% if not form.fields.skills.queryset.exists %}<p class="mt-1 text-sm">No skills have been added yet.</p>{% endif %}
+      </div>
+      <div class="sm:col-span-2">{% include "core/_field.html" with field=form.description %}</div>
+    </div>
+
+    <div class="card-actions mt-2">
+      <button type="submit" class="btn btn-primary">{% if object %}Save changes{% else %}Add job opening{% endif %}</button>
+      <a href="{% if object %}{{ object.get_absolute_url }}{% else %}{% url 'jobs:job_list' %}{% endif %}" class="btn btn-ghost">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

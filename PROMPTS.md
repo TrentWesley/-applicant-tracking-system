@@ -673,6 +673,210 @@ for the expected reason before any code was written.
 
 ---
 
+## Entry 12
+
+**Date:** 2026-10-27
+
+**Phase:** Phase 3 implementation (Skills and job openings)
+
+**Prompt:**
+```
+/implement Implement Phase 3 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Follow the exact Phase 3 scope: Skill model with case-insensitive unique
+names; Admin-only skill creation, listing, editing, and deletion, including preventing deletion of
+skills assigned to jobs; JobOpening model with required title, employment type, and work mode; new
+job openings default to Open; job creation, listing, detail, and editing; assign multiple skills to
+job openings; filter job openings by skill; Recruiter and Admin permissions, enforced server-side;
+DaisyUI forms and templates consistent with the existing sidebar layout. Requirements: strict TDD
+(Red-Green-Refactor); write failing tests before implementing each feature; follow the Phase 3 user
+stories and acceptance criteria; preserve all Phase 1 and Phase 2 functionality; do not implement
+job close/reopen actions or permanent job deletion yet; run the complete test suite, Ruff lint and
+format checks, Django system checks, and migration checks; update PROMPTS.md; stop after Phase 3
+for my review before committing or pushing. Do not start Phase 4.
+```
+
+**Result:**
+Claude Code built Phase 3 in four Red-Green cycles, plus three more Red-Green fixes found during
+the visual check. Each time, the tests were run and seen to fail for the expected reason before
+any code was written.
+
+1. **Models** (`jobs/tests/test_models.py`, 17 tests).
+   - **Red:** `jobs.models` didn't exist.
+   - **Green:**
+     - `Skill`: a name, `UniqueConstraint(Lower("name"))` with the message "A skill with this
+       name already exists.", ordered alphabetically ignoring case.
+     - `JobOpening`: required title, employment type (Full-time, Part-time, Contract,
+       Internship) and work mode (On-site, Remote, Hybrid); optional department, location and
+       description; timestamps; and `skills`, a many-to-many with `related_name="jobs"`.
+     - `status` (Open, Closed) defaults to Open and is `editable=False`, so no ModelForm can
+       include it. Phase 7's Close and Reopen actions will be the only way to change it.
+   - **Tests:** the database refuses a skill name that differs only in case; required fields
+     and invalid choices are refused; a new job is Open; one job can have many skills and one
+     skill many jobs.
+2. **Group permissions** (`test_permissions.py`, 3 tests).
+   - **Red:** the groups had no `jobs` permissions.
+   - **Green:** migration `0002_jobs_group_permissions` uses `grant_permissions`.
+     - Recruiter: view, add and change on JobOpening; view on Skill.
+     - Admin: all four on both models.
+   - The migration reverses cleanly: `migrate jobs zero`, then re-migrate.
+3. **Forms** (`test_forms.py`, 18 tests).
+   - **Red:** `jobs.forms` didn't exist.
+   - **Green:**
+     - `SkillForm.clean_name` checks `__iexact`, excluding the skill being renamed, so the
+       duplicate message sits on the name field. Surrounding spaces are stripped first.
+     - `JobOpeningForm` has no status field, and skills are chosen with checkboxes.
+     - A posted `status` is ignored on create, and on editing open or closed jobs (AC11).
+   - A test showed `DaisyUIFormMixin` gave checkbox lists the text-input class. It now gives
+     them `checkbox`.
+4. **Views and templates** (`test_skill_views.py` 20 tests, `test_job_views.py` 32 tests).
+   - **Red:** the URL names didn't exist.
+   - **Green:** generic CBVs with `PermissionRequiredMixin` and `raise_exception=True`.
+   - **Jobs:**
+     - the list at `/jobs/` has a GET skill filter (`?skill=<pk>`), skill badges that link to
+       the filtered list, and an Open or Closed status badge (`core/_job_status_badge.html`);
+     - an unknown or malformed `?skill=` value is ignored;
+     - detail at `/jobs/<pk>/`;
+     - create at `/jobs/new/` and edit at `/jobs/<pk>/edit/`, both redirecting to the detail
+       page with a success message.
+   - **Skills (Admin only):**
+     - the list at `/skills/` shows how many jobs use each skill;
+     - create and rename both return to the list.
+     - The list requires `view_skill` **and** `change_skill`. Recruiters can view skills
+       (they appear on jobs) but get 403 on the management page.
+   - **Skill delete:**
+     - `/skills/<pk>/delete/` shows a confirmation page on GET and deletes on POST.
+     - While any job, open or closed, uses the skill, both the page and a POST show "Python
+       can't be deleted because…" with links to those jobs, offer no Delete button, and change
+       nothing (AC16).
+     - The first version guarded the POST with a `skill.jobs.exists()` check. It was replaced
+       after review; see "Concurrency fix" below.
+   - **Permission tests:**
+     - Recruiters get 403 on every skill page, and their POSTs change nothing;
+     - Admins and superusers can manage skills;
+     - Recruiters and Admins can create, edit, list and view jobs;
+     - a view-only user can't add or edit jobs;
+     - anonymous users are redirected to login.
+   - **Navigation:** Job Openings and Skills share the `jobs` namespace, so `_nav_link.html`'s
+     `section` is now a view-name prefix (`"candidates:"`, `"jobs:job_"`, `"jobs:skill_"`).
+     Tests check each link is marked current only on its own pages.
+   - **Accessibility:** `_field.html` renders checkbox lists in a `<fieldset>` with a
+     `<legend>`. Django gives these fields no single `<label for>` target.
+
+**Visual check and fixes:**
+- Headless-Edge screenshots of every new page used sample data inside a rolled-back
+  transaction. They showed three bugs, and each got a failing test or a confirmed cause first:
+  1. **Skill checkboxes overlapped the next field.** Django copies widget attrs onto the
+     wrapping `<div>` too, so the whole list was drawn as one DaisyUI checkbox box.
+     - **Red:** a test asserted the wrapper has no class.
+     - **Fix:** `core.forms.CheckboxSelectMultiple` drops the class from the wrapper only. The
+       new `.choice-grid` CSS lays the options out in a grid.
+  2. **Invalid selects kept a grey border.** This also affected the Phase 2 candidate Source
+     field.
+     - **Cause:** DaisyUI 5 emits its components in sublayers of `@layer utilities` and colours
+       borders through `--input-color`. Our rule in `@layer components` always lost.
+     - **Fix:** the rule moved to `@layer utilities` and sets `--input-color`. The rebuilt
+       screenshots show red borders on both inputs and selects.
+  3. **The skill list wasn't alphabetical.** Django drops `Meta.ordering` from GROUP BY queries,
+     and the job-count annotation makes one.
+     - **Red:** an ordering test failed.
+     - **Fix:** the view orders explicitly.
+- **Phone width:** headless Edge won't size a window below about 492 px, so the pages were
+  also measured inside a 375 px iframe. No page scrolls sideways; wide tables scroll inside
+  their card.
+
+**Verification:**
+- `ruff check` and `ruff format --check` are clean; `manage.py check` reports no issues;
+  `makemigrations --check` and `migrate --check` are clean.
+- **182 of 182 tests passed** before review: 92 from Phases 1–2 and 90 from Phase 3.
+- **Covered:** user stories 20, 26, 27, 28 and 29; AC11, AC14, AC15 and AC16; and AC2/AC3 for
+  jobs and skills.
+- **Not started, as planned:**
+  - **Phase 4 onward:** applications and hired counts on the job page.
+  - **Phase 7:** the Close and Reopen actions, Job Closed badges and the active-applications
+    note.
+  - **Phase 10:** permanent job deletion. Only deletion is Phase 10, not Close and Reopen.
+
+**Decisions and limitations raised for review:**
+- **Skills are optional on a job.** The plan lists only title, employment type and work mode as
+  required; "required skills" in US 20 means the skills the job requires.
+- **Skill-delete race.** If a job gained the skill between the check and the delete, the delete
+  still went ahead and silently removed the skill from that job.
+
+**Feedback and decisions:**
+- I approved the Phase 3 implementation, including optional skills on a job.
+- **I asked for the skill-delete race to be fixed before committing,** rather than documented.
+  A skill must never be silently removed from a job.
+- I asked for the documentation to make clear that Close and Reopen belong to Phase 7, not
+  Phase 10.
+  - **Found:** the plan, code comments and this entry already gave Phase 7, but the one wrapped
+    "Not started" sentence was easy to misread. It's now the list above.
+
+**Concurrency fix (TDD):**
+- **Root cause:** for an automatic many-to-many, deleting a skill also runs
+  `DELETE FROM jobs_jobopening_skills WHERE skill_id = …`. Any job link that exists at that
+  moment, including one committed just after the `exists()` check, is wiped with no error.
+- **Shown first:** a throwaway TransactionTestCase made `exists()` miss a real link. The skill
+  was deleted and the link vanished. The test was removed afterwards.
+- **Design:**
+  - **Explicit through model:** `JobSkill`, with job FK CASCADE and skill FK **PROTECT**, plus a
+    unique (job, skill) constraint and no model permissions of its own. Django now refuses to
+    delete a used skill instead of deleting its links.
+  - **Database foreign key as the final guard:** Django enables SQLite foreign-key enforcement
+    and creates FKs as deferred. A skill row can't be deleted while a link references it, and a
+    link to a deleted skill can't be inserted. The commit fails with `IntegrityError` in either
+    order, whatever the timing, and nothing changes.
+  - **View:** the `exists()` pre-check is gone, because a check-then-act step is the race. The
+    view deletes inside `transaction.atomic()` and shows the same refusal page on
+    `ProtectedError` or `IntegrityError`.
+  - **Bug found by the tests:** a failed delete still clears the instance's pk, so the refusal
+    page crashed. The view now reloads the skill before rendering.
+  - **Migration:** Phase 3 wasn't committed, so `jobs/0001_initial` was regenerated. Django
+    can't add `through=` to an existing many-to-many. The local database had no jobs data and
+    was migrated back to zero and forward again.
+- **SQLite transaction mode:** left at the default (deferred). The database FK closes the race
+  without making every transaction take the write lock up front.
+- **Regression tests:**
+  - **Model (TestCase):**
+    - deleting a used skill raises ProtectedError, and the link survives;
+    - a duplicate (job, skill) row is refused;
+    - deleting a job removes its links but not the skills.
+  - **Race (`test_skill_delete_race.py`):** a TransactionTestCase that commits for real, so the
+    deferred FK check runs. It restores the role groups afterwards with `serialized_rollback`.
+    - Raw SQL can't delete a used skill.
+    - A link to a just-deleted skill can't be inserted.
+    - **End to end:** the delete's PROTECT lookup is blinded, as if another request committed
+      the link right after it. The POST still shows the refusal, and the skill and link both
+      survive.
+  - **Red first:** without exception handling these tests failed with `ProtectedError` and
+    `FOREIGN KEY constraint failed`.
+- **Remaining edge, not silent:** if a job form is saved with a skill that an Admin deletes in
+  the same instant, the job save fails with a server error. No data is lost or left
+  inconsistent. This is the same kind of edge as Phase 2's duplicate-email race.
+
+**Final review before committing:**
+- No stubs, TODOs or debug code remain. The temporary `job_detail` stub route from cycle 1 and
+  the jobs placeholder views were replaced.
+- **Fixed during review:**
+  - the `_nav_link.html` comment now says "contains" rather than "starts with", because the
+    template's `in` test is a substring match;
+  - Ruff asked for `JobSkill.__str__` (a test was added) and a combined `with` statement.
+- **Left as is:** `JobsPermissionMixin` repeats Phase 2's three-line `CandidatePermissionMixin`.
+  Merging them would mean editing approved Phase 2 code for little gain.
+- No credentials, `db.sqlite3`, built CSS, Tailwind CLI binary or `__pycache__` are in the
+  commit. The settings still read `DJANGO_SECRET_KEY` from the environment.
+- CLAUDE.md documents the jobs URLs, test helpers, the nav `section` prefix, the checkbox
+  widget, the CSS layer, and the skill-delete strategy.
+
+**Final verification:**
+- `ruff check` and `ruff format --check` are clean; `manage.py check` reports no issues;
+  `makemigrations --check` and `migrate --check` are clean.
+- **189 of 189 tests pass:** 92 from Phases 1–2 and 97 from Phase 3.
+- Committed as "Phase 3: skills and job openings" and pushed to `main`. Phase 4 has not been
+  started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

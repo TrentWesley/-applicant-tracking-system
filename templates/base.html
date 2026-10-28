@@ -35,12 +35,12 @@
       <nav aria-label="Main navigation">
         <ul class="menu w-full p-0">
           {% include "core/_nav_link.html" with route="core:dashboard" label="Dashboard" %}
-          {% include "core/_nav_link.html" with route="candidates:candidate_list" label="Candidates" section="candidates" %}
-          {% include "core/_nav_link.html" with route="jobs:job_list" label="Job Openings" %}
+          {% include "core/_nav_link.html" with route="candidates:candidate_list" label="Candidates" section="candidates:" %}
+          {% include "core/_nav_link.html" with route="jobs:job_list" label="Job Openings" section="jobs:job_" %}
           {% include "core/_nav_link.html" with route="pipeline:application_list" label="Applications" %}
           {% if user_is_admin %}
           <li class="menu-title mt-4">Admin</li>
-          {% include "core/_nav_link.html" with route="jobs:skill_list" label="Skills" %}
+          {% include "core/_nav_link.html" with route="jobs:skill_list" label="Skills" section="jobs:skill_" %}
           {% include "core/_nav_link.html" with route="staff:staff_list" label="Staff Management" %}
           {% endif %}
         </ul>

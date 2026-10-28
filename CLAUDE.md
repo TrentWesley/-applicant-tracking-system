@@ -45,7 +45,9 @@ uv run python manage.py check
   `core/tests/utils.py` (`make_recruiter`, `make_admin`).
 - `candidates`: Candidate (`/candidates/`, `/candidates/new/`, `/candidates/<pk>/`,
   `/candidates/<pk>/edit/`); test helper `candidates.tests.utils.make_candidate`.
-- `jobs`: JobOpening and Skill (`/jobs/` and `/skills/`).
+- `jobs`: JobOpening and Skill (`/jobs/`, `/jobs/new/`, `/jobs/<pk>/`, `/jobs/<pk>/edit/`,
+  `/jobs/?skill=<pk>`; Admin-only `/skills/`, `/skills/new/`, `/skills/<pk>/edit/`,
+  `/skills/<pk>/delete/`); test helpers `jobs.tests.utils.make_skill` and `make_job`.
 - `pipeline`: Application, StageChange and the single **stage-change service**.
 - `staff`: staff management over Django's built-in `User` (no custom user model).
 
@@ -68,18 +70,25 @@ uv run python manage.py check
   `jobs:job_list`, `jobs:skill_list`, `pipeline:application_list`, `staff:staff_list`).
 - **Templates:** every page extends `base.html` and fills `title` and `content`; one `<h1>` per page.
   Nav links use `core/_nav_link.html`, which marks the current page with `menu-active` and
-  `aria-current="page"`; pass `section="<namespace>"` so every page in that app highlights the link.
+  `aria-current="page"`; pass `section="<view-name prefix>"` (`"candidates:"`, `"jobs:job_"`,
+  `"jobs:skill_"`) so every page in that section highlights the link.
   The drawer keeps `auto-cols-[max-content_minmax(0,1fr)]` so content never scrolls sideways at
   phone width.
 - **Forms:** ModelForms mix in `core.forms.DaisyUIFormMixin` (DaisyUI widget classes) and render
   each field with `core/_field.html` (label, required `*`, help text, and errors in
   `id_<field>_error`, which Django's `aria-describedby` points to). Invalid inputs get a red border
-  from the `aria-invalid` rule in `tailwind/source.css`.
+  from the `aria-invalid` rule in `tailwind/source.css` (it lives in `@layer utilities`, because
+  DaisyUI 5's own rules sit in sublayers there). Checkbox lists use `core.forms.CheckboxSelectMultiple`;
+  `_field.html` renders them in a `<fieldset>` with a `<legend>`.
 - **Views:** generic CBVs with `PermissionRequiredMixin` and `raise_exception = True` (403 for
   signed-in users without the permission). Templates hide controls with `perms.<app>.<codename>`.
 - **Case-insensitive uniqueness:** a `UniqueConstraint(Lower(field))` in the model, plus a form
   `clean_<field>` that checks `__iexact` (excluding the instance being edited) so the message sits
   on the field.
+- **Deleting a skill:** job skills go through the `JobSkill` model, whose `skill` FK is `PROTECT`.
+  The skill delete view has no "is it used?" pre-check; it deletes inside `transaction.atomic()` and
+  shows the refusal on `ProtectedError`, or on `IntegrityError` when the database's deferred FK
+  check catches an assignment committed by another request during the delete.
 - **HTMX:** the CSRF token is sent on every HTMX request through `hx-headers` on `<body>`. Stage
   actions and notes edits return partials when `HX-Request` is set.
 - **Stage changes:** only through the stage-change service, with the check order: stale expected

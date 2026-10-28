@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}{{ job }}{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <a href="{% url 'jobs:job_list' %}" class="link link-hover text-sm">← Job Openings</a>
+    <h1 class="text-2xl font-bold">{{ job }}</h1>
+  </div>
+  {% if perms.jobs.change_jobopening %}
+  <a href="{% url 'jobs:job_update' job.pk %}" class="btn btn-sm">Edit</a>
+  {% endif %}
+</div>
+
+<section class="card bg-base-100 shadow-sm" aria-labelledby="details-heading">
+  <div class="card-body">
+    <h2 id="details-heading" class="card-title">Details</h2>
+    <dl class="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-[max-content_1fr]">
+      <dt class="font-medium">Status</dt>
+      <dd>{% include "core/_job_status_badge.html" %}</dd>
+      <dt class="font-medium">Department</dt>
+      <dd>{{ job.department|default:"—" }}</dd>
+      <dt class="font-medium">Location</dt>
+      <dd>{{ job.location|default:"—" }}</dd>
+      <dt class="font-medium">Employment type</dt>
+      <dd>{{ job.get_employment_type_display }}</dd>
+      <dt class="font-medium">Work mode</dt>
+      <dd>{{ job.get_work_mode_display }}</dd>
+      <dt class="font-medium">Added</dt>
+      <dd>{{ job.created_at|date:"M j, Y, g:i a" }}</dd>
+      <dt class="font-medium">Last updated</dt>
+      <dd>{{ job.updated_at|date:"M j, Y, g:i a" }}</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="card bg-base-100 shadow-sm" aria-labelledby="skills-heading">
+  <div class="card-body">
+    <h2 id="skills-heading" class="card-title">Required skills</h2>
+    {% if job.skills.all %}
+    <ul class="flex flex-wrap gap-2">
+      {% for job_skill in job.skills.all %}
+      <li><a href="{% url 'jobs:job_list' %}?skill={{ job_skill.pk }}" class="badge badge-outline">{{ job_skill }}</a></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-base-content/70">No skills listed.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card bg-base-100 shadow-sm" aria-labelledby="description-heading">
+  <div class="card-body">
+    <h2 id="description-heading" class="card-title">Description</h2>
+    {% if job.description %}{{ job.description|linebreaks }}{% else %}<p class="text-base-content/70">No description.</p>{% endif %}
+  </div>
+</section>
+{% endblock %}

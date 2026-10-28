@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Job Openings{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Job Openings</h1>
+    <p class="text-sm text-base-content/70">Open and closed jobs, by title.</p>
+  </div>
+  {% if perms.jobs.add_jobopening %}
+  <a href="{% url 'jobs:job_create' %}" class="btn btn-primary btn-sm">Add job opening</a>
+  {% endif %}
+</div>
+
+<form method="get" action="{% url 'jobs:job_list' %}" class="flex flex-wrap items-end gap-3" role="search" aria-label="Filter job openings">
+  <div class="w-full sm:w-64">
+    <label for="{{ filter_form.skill.id_for_label }}" class="label mb-1 text-base-content">Skill</label>
+    {{ filter_form.skill }}
+  </div>
+  <button type="submit" class="btn">Filter</button>
+  {% if skill %}<a href="{% url 'jobs:job_list' %}" class="btn btn-ghost">Clear filter</a>{% endif %}
+</form>
+
+<section class="card bg-base-100 shadow-sm">
+  <div class="card-body p-0">
+    {% if jobs %}
+    <div class="overflow-x-auto">
+      <table class="table">
+        {% if skill %}<caption class="p-4 text-left text-sm">Job openings that need {{ skill }}</caption>{% endif %}
+        <thead>
+          <tr><th scope="col">Title</th><th scope="col">Department</th><th scope="col">Type</th><th scope="col">Work mode</th><th scope="col">Skills</th><th scope="col">Status</th></tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+          <tr>
+            <td>
+              <a href="{{ job.get_absolute_url }}" class="link link-hover font-medium">{{ job }}</a>
+              {% if job.location %}<div class="text-xs text-base-content/70">{{ job.location }}</div>{% endif %}
+            </td>
+            <td>{{ job.department|default:"—" }}</td>
+            <td class="whitespace-nowrap">{{ job.get_employment_type_display }}</td>
+            <td class="whitespace-nowrap">{{ job.get_work_mode_display }}</td>
+            <td>
+              <div class="flex flex-wrap gap-1">
+                {% for job_skill in job.skills.all %}
+                <a href="{% url 'jobs:job_list' %}?skill={{ job_skill.pk }}" class="badge badge-outline badge-sm">{{ job_skill }}</a>
+                {% empty %}—{% endfor %}
+              </div>
+            </td>
+            <td>{% include "core/_job_status_badge.html" %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% elif skill %}
+    <p class="p-6">No job openings need {{ skill }}.</p>
+    {% else %}
+    <p class="p-6">No job openings yet.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
