@@ -1,13 +1,37 @@
+from typing import NamedTuple
+
 from django.contrib import messages
 from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.functional import cached_property
+from django.views import View
 from django.views.generic import CreateView, DetailView, ListView
 
 from candidates.models import Candidate
 from core.views import StaffPermissionMixin
 from pipeline.forms import ApplicationForm
 from pipeline.models import Application, Stage
-from pipeline.services import StageChangeRefused, create_application
+from pipeline.services import (
+    StageChangeRefused,
+    available_moves,
+    change_stage,
+    create_application,
+)
+
+
+class Feedback(NamedTuple):
+    ok: bool
+    text: str
+
+
+def stage_card_context(application, feedback=None):
+    """What the stage card and the history table need, on the detail page and after a move."""
+    return {
+        "application": application,
+        "moves": available_moves(application.stage),
+        "history": application.stage_changes.select_related("changed_by"),
+        "feedback": feedback,
+    }
 
 
 class ApplicationListView(StaffPermissionMixin, ListView):
@@ -67,5 +91,39 @@ class ApplicationDetailView(StaffPermissionMixin, DetailView):
     template_name = "pipeline/application_detail.html"
 
     def get_context_data(self, **kwargs):
-        history = self.object.stage_changes.select_related("changed_by")
-        return super().get_context_data(history=history, **kwargs)
+        return super().get_context_data(**stage_card_context(self.object), **kwargs)
+
+
+class ApplicationTransitionView(StaffPermissionMixin, View):
+    """
+    POST action + expected_stage (hidden fields on the stage card). With HTMX the refreshed card
+    comes back, plus the history table out of band; without it, the detail page reloads.
+    """
+
+    permission_required = "pipeline.change_application"
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        application = get_object_or_404(Application, pk=pk)
+        try:
+            move = change_stage(
+                application=application,
+                action=request.POST.get("action", ""),
+                expected_stage=request.POST.get("expected_stage", ""),
+                changed_by=request.user,
+                note=request.POST.get("note", ""),
+            )
+        except StageChangeRefused as refusal:
+            feedback = Feedback(ok=False, text=str(refusal))
+            # A stale refusal means another request moved it; show where it is now.
+            application.refresh_from_db()
+        else:
+            moved = f"{move.get_from_stage_display()} to {move.get_to_stage_display()}"
+            feedback = Feedback(ok=True, text=f"Moved from {moved}.")
+
+        if request.headers.get("HX-Request"):
+            context = stage_card_context(application, feedback)
+            return render(request, "pipeline/_transition_response.html", context)
+        level = messages.SUCCESS if feedback.ok else messages.ERROR
+        messages.add_message(request, level, feedback.text)
+        return redirect(application)

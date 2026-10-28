@@ -8,14 +8,12 @@
   <h1 class="text-2xl font-bold">{{ application }}</h1>
 </div>
 
+{% include "pipeline/_stage_card.html" %}
+
 <section class="card bg-base-100 shadow-sm" aria-labelledby="details-heading">
   <div class="card-body">
     <h2 id="details-heading" class="card-title">Details</h2>
     <dl class="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-[max-content_1fr]">
-      <dt class="font-medium">Stage</dt>
-      <dd>{% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %}</dd>
-      <dt class="font-medium">Stage changed</dt>
-      <dd>{{ application.stage_changed_at|date:"M j, Y, g:i a" }}</dd>
       <dt class="font-medium">Candidate</dt>
       <dd><a href="{{ application.candidate.get_absolute_url }}" class="link">{{ application.candidate }}</a></dd>
       <dt class="font-medium">Job opening</dt>
@@ -33,28 +31,5 @@
   </div>
 </section>
 
-<section class="card bg-base-100 shadow-sm" aria-labelledby="history-heading">
-  <div class="card-body p-0">
-    <h2 id="history-heading" class="card-title px-6 pt-6">Stage history</h2>
-    <div class="overflow-x-auto">
-      <table class="table">
-        <caption class="sr-only">Stage changes, oldest first</caption>
-        <thead>
-          <tr><th scope="col">When</th><th scope="col">From</th><th scope="col">To</th><th scope="col">By</th><th scope="col">Note</th></tr>
-        </thead>
-        <tbody>
-          {% for change in history %}
-          <tr>
-            <td class="whitespace-nowrap">{{ change.changed_at|date:"M j, Y, g:i a" }}</td>
-            <td>{% if change.from_stage %}{% include "core/_stage_badge.html" with stage=change.from_stage label=change.get_from_stage_display %}{% else %}<span class="text-base-content/70">New application</span>{% endif %}</td>
-            <td>{% include "core/_stage_badge.html" with stage=change.to_stage label=change.get_to_stage_display %}</td>
-            <td>{{ change.changed_by.get_full_name|default:change.changed_by.get_username }}</td>
-            <td>{{ change.note|default:"—"|linebreaksbr }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</section>
+{% include "pipeline/_stage_history.html" %}
 {% endblock %}

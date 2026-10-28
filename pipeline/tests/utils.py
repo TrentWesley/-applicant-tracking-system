@@ -1,3 +1,5 @@
+from itertools import count
+
 from django.contrib.auth.models import User
 
 from candidates.tests.utils import make_candidate
@@ -5,6 +7,8 @@ from core.tests.utils import make_recruiter
 from jobs.tests.utils import make_job
 from pipeline.models import Application
 from pipeline.services import create_application
+
+_applicant_numbers = count(1)
 
 
 def default_creator():
@@ -14,11 +18,14 @@ def default_creator():
 
 def make_application(candidate=None, job=None, created_by=None, stage=None, **extra):
     """
-    Create an application through the service. A `stage` is then set directly, standing in for
-    the stage moves that arrive in Phases 5 and 6.
+    Create an application through the service, with a new candidate (unique email) and job
+    unless given. A `stage` is then set directly, as test setup for reaching any stage quickly;
+    only the creation entry is in its history.
     """
+    if candidate is None:
+        candidate = make_candidate(email=f"applicant{next(_applicant_numbers)}@example.com")
     application = create_application(
-        candidate=candidate or make_candidate(),
+        candidate=candidate,
         job_opening=job or make_job(),
         created_by=created_by or default_creator(),
         **extra,

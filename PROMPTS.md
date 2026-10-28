@@ -1076,6 +1076,214 @@ for the expected reason before any code was written.
 
 ---
 
+## Entry 14
+
+**Date:** 2026-10-27
+
+**Phase:** Phase 5 implementation (Advance and Back over HTMX, with stale and double-click safety)
+
+**Prompt:**
+```
+/implement Implement Phase 5 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Follow the exact Phase 5 scope: advance applications forward by one hiring
+stage; move applications backward by one hiring stage; follow the approved stage progression
+(Applied → Screening → Interview → Final Review → Offer → Hired); allow Hired only from Offer, and
+make Hired permanent; record every successful transition as a new immutable StageChange entry
+with the previous stage, new stage, acting user, timestamp, and optional note; update the
+application's current stage and stage_changed_at atomically with its history entry; use HTMX
+POST requests to perform stage transitions and refresh the appropriate UI sections; prevent
+double-clicks and stale submissions using the expected-stage check and conditional database
+updates; enforce Recruiter and Admin permissions server-side; display clear feedback when a
+transition is refused; preserve stage history and ensure refused transitions create no history
+entries. Requirements: strict TDD (Red-Green-Refactor); write failing tests before implementing
+each feature; follow the Phase 5 user stories and acceptance criteria; preserve Phases 1–4; do
+not implement Reject, Withdraw, or Reactivate (Phase 6), or job Close/Reopen or candidate
+Archive/Restore (Phases 7 and 8); run the complete test suite, Ruff lint and format checks,
+Django system checks, and migration checks; update PROMPTS.md; stop after Phase 5 for my review
+before committing or pushing. Do not begin Phase 6.
+```
+
+**Result:**
+Claude Code built Phase 5 in two Red-Green cycles, then checked the HTMX behaviour in a real
+browser.
+
+1. **Stage-change service: Advance and Back** (`pipeline/tests/test_transitions.py`, 18 tests).
+   - **Red:** `Action`, `change_stage` and `available_moves` didn't exist.
+   - **Green:**
+     - **`Action`** TextChoices (Advance, Back), plus an explicit `TRANSITIONS` table:
+       - Advance: Applied → Screening → Interview → Final Review → Offer → Hired;
+       - Back: Screening through Offer, back one stage;
+       - nothing from Hired, Rejected or Withdrawn.
+     - **`available_moves(stage)`** gives the card its buttons.
+     - **`change_stage(application, action, expected_stage, changed_by, note="")`**, inside
+       `transaction.atomic()`:
+       1. **Stale check:** reads the current stage. If it doesn't match `expected_stage`, it
+          refuses with "This application was already updated, so nothing was changed. It's now
+          at <stage>."
+       2. **Allowed check:** an unknown action gets "That stage action isn't recognised."; a
+          disallowed one gets "Back isn't allowed from Applied." or "Hired is permanent, so this
+          application can't be moved."
+       3. **Write:** a conditional `UPDATE … WHERE pk = … AND stage = expected` sets the stage and
+          `stage_changed_at`. Exactly one StageChange (from, to, user, same timestamp, trimmed
+          note) is written only when exactly one row was updated. Otherwise the move is refused as
+          stale.
+     - The service takes only an action, so no request can name a target stage. A test confirms
+       passing `to_stage` raises `TypeError`.
+   - **Tests:**
+     - **AC21:** every Advance and Back.
+     - **AC22:** Back from Applied; Advance and Back from Hired, Rejected and Withdrawn; unknown
+       actions.
+     - **Order:** the stale check comes before the allowed check.
+     - **AC28:** a double-click moves exactly once.
+     - **Race:** a move committed after the stale read is caught by the conditional UPDATE.
+     - **AC29:** the moves for all eight stages.
+   - **Mutation check:** making the UPDATE unconditional turned the race test red. The original
+     was then restored.
+   - **Test-helper bugs found, then fixed:**
+     - `make_application` always reused one candidate email; it now creates unique applicants;
+     - the race test's "unchanged" baseline needed a `refresh_from_db()`.
+2. **Transition endpoint and HTMX card** (`test_transition_views.py`, 23 tests).
+   - **Red:** the `application_transition` route didn't exist.
+   - **Green:**
+     - **Endpoint:** `ApplicationTransitionView` at POST `/applications/<pk>/transition/`.
+       - It requires `pipeline.change_application` (403 otherwise). GET gets 405, and an unknown
+         application gets 404.
+       - **With HTMX** it returns `_transition_response.html`: the refreshed stage card with the
+         feedback message inside, plus the history table swapped in out of band
+         (`hx-swap-oob`).
+       - Refusals return 200, so HTMX swaps the card with the reason. Success is
+         `role="status"`, a refusal is `role="alert"`, and the message gets `autofocus` so it's
+         announced after the swap.
+       - **Without HTMX** it redirects to the detail page with a success or error message.
+     - **Card:** `pipeline/_stage_card.html` replaces the stage rows in the detail page's Details.
+       - It shows the stage badge, "since …", and "Hired is permanent." where relevant.
+       - It has one form per allowed move ("Advance to Interview", "Back to Applied"), each with
+         hidden `action` and `expected_stage`, `hx-post`, `hx-target="#stage-card"` and
+         `hx-disabled-elt="find button"`.
+       - Users without the change permission see no buttons.
+     - **Shared context:** `stage_card_context()` feeds the detail page and the HTMX response.
+       History moved into `_stage_history.html`.
+   - **Tests:**
+     - **AC29:** the partial has no `<html>` or sidebar, and the buttons match each of the
+       eight stages.
+     - **AC27:** a stale click returns the current card and "already updated", with no new
+       StageChange.
+     - **AC28:** a double-click; a posted target stage is ignored; plain-POST fallbacks.
+     - **CSRF:** with `enforce_csrf_checks=True`, a POST without a token gets 403. The
+       `X-CSRFToken` header that HTMX sends from `<body hx-headers>` is accepted.
+     - **AC2:** Recruiter and Admin can move applications; view-only and no-role users get 403,
+       and nothing changes.
+   - **Two Phase 4 tests updated on purpose:** they asserted "no stage actions" on the detail
+     page. They now assert the history section has no form or inputs, and the URL check expects
+     `application_transition`. No URL creates, edits or deletes history.
+   - **Test bugs found, then fixed:** a lazy CSRF token needed `str()`; the `post()` helper
+     passed `follow=True` as form data; the read-only-history check ran into the sidebar's
+     logout form.
+3. **Refactor:** `change_stage` now returns the StageChange it wrote. The view builds "Moved from X
+   to Y." from that entry instead of `stage_changes.last()`, which could describe another
+   request's move.
+
+**Browser check of the real HTMX swap:**
+- A throwaway dev server ran from settings in the scratchpad, against a scratch SQLite file. It
+  allowed `X_FRAME_OPTIONS = "SAMEORIGIN"` for the harness only. The project's settings and
+  `db.sqlite3` were untouched, and the scratch database was deleted afterwards.
+- **Harness:** a same-origin page logged in, clicked the real buttons and recorded the DOM after
+  each `htmx:afterSettle`. The checks:
+  - **In place:** the card swapped in place (still one sidebar), and the buttons changed with the
+    stage.
+  - **History:** the table refreshed out of band (1 → 2 → 3 → 4 rows).
+  - **Focus:** it moved to the feedback alert.
+  - **Double-click:** two quick clicks sent one POST, because `hx-disabled-elt` worked.
+- A screenshot of a tampered, stale `expected_stage` showed the red "already updated" alert, the
+  current stage with corrected buttons, and no new history row.
+
+**Verification:**
+- `ruff check` and `ruff format --check` are clean (one long line in the view was split);
+  `manage.py check` reports no issues; `makemigrations --check` and `migrate --check` are clean.
+  Phase 5 needed no migration.
+- **311 of 311 tests pass:** 270 from Phases 1–4 and 41 from Phase 5.
+- **Covered:** user stories 36, 37, 43 and 44; AC21 (Advance and Back rows), AC22, AC27, AC28
+  and AC29; and AC2 for stage moves.
+- **Not started, as planned:** Reject, Withdraw and Reactivate with required notes (Phase 6);
+  Close and Reopen (Phase 7); Archive and Restore (Phase 8).
+
+**Decisions to review:**
+- **Moves live on the detail page's stage card only.** The list rows link to it. The plan says
+  "card or row", and the Implementation tasks only call for the card partial.
+- **Notes on moves:** Advance and Back are single clicks with no note field. The service and
+  endpoint already accept an optional `note`, which Phase 6's inline forms will use.
+- **Refusals return HTTP 200** with the card, because HTMX doesn't swap 4xx responses by
+  default. Permission failures still return 403.
+
+---
+
+## Entry 15
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 5 approval, final review, commit and push
+
+**Prompt:**
+```
+I approve Phase 5. I approve all three implementation decisions: keep Advance and Back buttons on
+the application detail page's Stage card only; keep Advance and Back as single-click actions
+without a note box; return HTTP 200 for refused transitions so HTMX can display feedback, while
+preserving HTTP 403 for permission failures. Before committing: review all Phase 5 changes for
+leftover stubs, duplicate code, accidental changes, and formatting issues; confirm that every
+successful stage transition creates exactly one immutable StageChange record and that refused
+transitions create none; confirm that stale requests, double-clicks, and concurrent transitions
+are handled safely; confirm no credentials, local database files, generated CSS, or build
+artifacts are included; run the complete automated test suite, Ruff lint and format checks,
+Django system checks, and migration checks one final time; update PROMPTS.md with my approval,
+the three decisions, and the final verification results. Commit with the message "Phase 5: hiring
+stage transitions". Push to the existing GitHub main branch. Report the final test count, commit
+hash, push status, and any remaining issues. Do not begin Phase 6 yet.
+```
+
+**Approved decisions:**
+1. Advance and Back live on the application detail page's Stage card only.
+2. Advance and Back are single clicks with no note box. The service still accepts an optional
+   note for Phase 6.
+3. Refused transitions return HTTP 200 with the card and the reason, so HTMX swaps it in.
+   Permission failures stay HTTP 403.
+
+**Final review:**
+- **No leftovers:** no stubs, TODOs or debug output in the Phase 5 files, and no changes outside
+  `pipeline/`, `CLAUDE.md` and `PROMPTS.md`.
+- **Two small cleanups:**
+  - `ApplicationTransitionView` called `refresh_from_db()` again after a successful move,
+    which the service already does. It now refreshes only after a refusal, so a stale card shows
+    the current stage.
+  - CLAUDE.md said the `make_application` `stage=` argument stood in "until Phases 5–6 add
+    moves". It now describes the helper as it is, and the wrapping is fixed.
+- **One StageChange per move, none on refusal:** `change_stage` writes the StageChange only after
+  its conditional UPDATE changed exactly one row, inside the same `transaction.atomic()`. Every
+  refusal is raised before that point. Tests check the count after each Advance and Back, after
+  every refused move, and in the view tests (`assert_unchanged`). The Phase 4 append-only guards
+  (model, queryset and SQLite trigger) still make each entry immutable.
+- **Stale, double-click and concurrent requests:**
+  - every form posts the `expected_stage` it showed, and a mismatch is refused as "already
+    updated" before anything is written;
+  - a second click gets the same refusal, and `hx-disabled-elt` stops the browser sending it at
+    all;
+  - a move committed between the stale read and the write is caught by `UPDATE … WHERE stage =
+    expected`, which then updates no rows and writes no history. The race test proves this
+    (and failed when the UPDATE was made unconditional).
+- **Nothing sensitive or generated:** `db.sqlite3`, `assets/css/tailwind.css`, `.venv` and `.env`
+  are gitignored and none is in the change set. A scan of the diff found no credentials.
+
+**Final verification:**
+- **311 of 311 tests pass:** 270 from Phases 1–4 and 41 from Phase 5.
+- `ruff check` and `ruff format --check` are clean (93 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Result:** committed as "Phase 5: hiring stage transitions" and pushed to `main`. Phase 6 not
+started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

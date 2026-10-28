@@ -49,11 +49,12 @@ uv run python manage.py check
   `/jobs/?skill=<pk>`; Admin-only `/skills/`, `/skills/new/`, `/skills/<pk>/edit/`,
   `/skills/<pk>/delete/`); test helpers `jobs.tests.utils.make_skill` and `make_job`.
 - `pipeline`: Application, StageChange and the single **stage-change service**
-  (`pipeline/services.py`; `create_application` so far). Pages: `/applications/` (`?stage=<value>`,
-  lowercase stored values such as `final_review`), `/applications/new/` (`?candidate=<pk>`
-  preselects an active candidate), `/applications/<pk>/`. Test helper
-  `pipeline.tests.utils.make_application` (creates through the service; a `stage=` argument is set
-  directly until Phases 5–6 add moves).
+  (`pipeline/services.py`: `create_application`, and `change_stage` for Advance/Back). Pages:
+  `/applications/` (`?stage=<value>`, lowercase stored values such as `final_review`),
+  `/applications/new/` (`?candidate=<pk>` preselects an active candidate), `/applications/<pk>/`,
+  POST `/applications/<pk>/transition/`. Test helper `pipeline.tests.utils.make_application`
+  (creates through the service with a unique candidate; a `stage=` argument is set directly as
+  test setup, so only the creation entry is in its history).
 - `staff`: staff management over Django's built-in `User` (no custom user model).
 
 ## Conventions
@@ -103,6 +104,12 @@ uv run python manage.py check
   the queryset refuses `update()`, `bulk_update()` and `delete()`, and a SQLite trigger (`pipeline/0002`) refuses any
   `UPDATE`. Rows go only through the cascade when their Application is deleted. Service refusals
   raise `StageChangeRefused` with the user-facing message.
+- **Stage card:** `pipeline/_stage_card.html` (`id="stage-card"`) renders only the moves from
+  `services.available_moves(stage)`, one form each with hidden `action` and `expected_stage`,
+  `hx-post`, `hx-target="#stage-card"` and `hx-disabled-elt="find button"`. The HTMX response
+  (`_transition_response.html`) is the card plus `_stage_history.html` swapped out of band; without
+  HTMX the view redirects to the detail page with a message. Refusals return 200 so HTMX swaps the
+  card with the reason. Views build the card's context with `pipeline.views.stage_card_context`.
 - **Stage changes:** only through the stage-change service, with the check order: stale expected
   stage → action allowed → required note → guards; conditional `UPDATE … WHERE stage = expected`
   inside `transaction.atomic()`, one StageChange per updated row.

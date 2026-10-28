@@ -1,0 +1,28 @@
+<section id="stage-card" class="card bg-base-100 shadow-sm" aria-labelledby="stage-heading">
+  <div class="card-body">
+    <h2 id="stage-heading" class="card-title">Stage</h2>
+    {% if feedback %}
+    {# Focused after an HTMX swap (htmx honours autofocus), so the result is announced. #}
+    <div class="alert {% if feedback.ok %}alert-success{% else %}alert-error{% endif %}" role="{% if feedback.ok %}status{% else %}alert{% endif %}" tabindex="-1" autofocus>{{ feedback.text }}</div>
+    {% endif %}
+    <p class="flex flex-wrap items-center gap-2">
+      {% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %}
+      <span class="text-sm text-base-content/70">since {{ application.stage_changed_at|date:"M j, Y, g:i a" }}</span>
+    </p>
+    {% if application.stage == "hired" %}<p class="text-sm">Hired is permanent.</p>{% endif %}
+    {% if moves and perms.pipeline.change_application %}
+    {% url 'pipeline:application_transition' application.pk as transition_url %}
+    <div class="flex flex-wrap gap-2">
+      {% for move in moves %}
+      {# Each form carries the stage this card shows; the server refuses it if that's out of date. #}
+      <form method="post" action="{{ transition_url }}" hx-post="{{ transition_url }}" hx-target="#stage-card" hx-swap="outerHTML" hx-disabled-elt="find button">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="{{ move.action.value }}">
+        <input type="hidden" name="expected_stage" value="{{ application.stage }}">
+        <button type="submit" class="btn btn-sm{% if move.action == 'advance' %} btn-primary{% endif %}">{{ move.action.label }} to {{ move.target.label }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</section>

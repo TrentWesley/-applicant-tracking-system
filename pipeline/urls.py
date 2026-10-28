@@ -8,4 +8,9 @@ urlpatterns = [
     path("", views.ApplicationListView.as_view(), name="application_list"),
     path("new/", views.ApplicationCreateView.as_view(), name="application_create"),
     path("<int:pk>/", views.ApplicationDetailView.as_view(), name="application_detail"),
+    path(
+        "<int:pk>/transition/",
+        views.ApplicationTransitionView.as_view(),
+        name="application_transition",
+    ),
 ]

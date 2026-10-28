@@ -312,11 +312,14 @@ class ApplicationDetailTests(StaffTestCase):
         self.assertContains(response, ">Applied</span>")
         self.assertContains(response, "Rita Ng")
 
-    def test_detail_has_no_stage_actions_or_history_editing(self):
+    def test_history_is_read_only_on_the_detail_page(self):
+        # Stage moves (Phase 5) post to the transition URL; nothing edits the history itself.
         self.client.force_login(self.staff[0])
-        response = self.client.get(detail_url(self.application))
-        self.assertNotContains(response, "Advance")
-        self.assertNotContains(response, 'name="expected_stage"')
+        html = self.client.get(detail_url(self.application)).content.decode()
+        start = html.index('id="stage-history"')
+        history = html[start : html.index("</section>", start)]
+        self.assertNotIn("<form", history)
+        self.assertNotIn("<input", history)
         self.assertEqual(self.client.post(detail_url(self.application)).status_code, 405)
 
     def test_unknown_application_is_404(self):
@@ -335,6 +338,7 @@ class NoStageChangeScreensTests(TestCase):
                 "pipeline:application_list",
                 "pipeline:application_create",
                 "pipeline:application_detail",
+                "pipeline:application_transition",
             },
         )
         self.assertFalse({n for n in names if "stage" in n.lower() or "history" in n.lower()})
