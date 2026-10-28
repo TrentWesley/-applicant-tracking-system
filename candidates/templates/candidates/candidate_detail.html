@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}{{ candidate }}{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <a href="{% url 'candidates:candidate_list' %}" class="link link-hover text-sm">← Candidates</a>
+    <h1 class="text-2xl font-bold">{{ candidate }}</h1>
+  </div>
+  {% if perms.candidates.change_candidate %}
+  <a href="{% url 'candidates:candidate_update' candidate.pk %}" class="btn btn-sm">Edit</a>
+  {% endif %}
+</div>
+
+<section class="card bg-base-100 shadow-sm" aria-labelledby="contact-heading">
+  <div class="card-body">
+    <h2 id="contact-heading" class="card-title">Details</h2>
+    <dl class="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-[max-content_1fr]">
+      <dt class="font-medium">Email</dt>
+      <dd class="break-all"><a href="mailto:{{ candidate.email }}" class="link">{{ candidate.email }}</a></dd>
+      <dt class="font-medium">Phone</dt>
+      <dd>{{ candidate.phone|default:"—" }}</dd>
+      <dt class="font-medium">Source</dt>
+      <dd>{{ candidate.get_source_display }}</dd>
+      <dt class="font-medium">Source details</dt>
+      <dd>{{ candidate.source_details|default:"—" }}</dd>
+      <dt class="font-medium">LinkedIn or portfolio</dt>
+      <dd class="break-all">{% if candidate.profile_url %}<a href="{{ candidate.profile_url }}" class="link" rel="noopener noreferrer" target="_blank">{{ candidate.profile_url }}</a>{% else %}—{% endif %}</dd>
+      <dt class="font-medium">Added</dt>
+      <dd>{{ candidate.created_at|date:"M j, Y, g:i a" }}</dd>
+      <dt class="font-medium">Last updated</dt>
+      <dd>{{ candidate.updated_at|date:"M j, Y, g:i a" }}</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="card bg-base-100 shadow-sm" aria-labelledby="notes-heading">
+  <div class="card-body">
+    <h2 id="notes-heading" class="card-title">Notes</h2>
+    {% if candidate.notes %}{{ candidate.notes|linebreaks }}{% else %}<p class="text-base-content/70">No notes.</p>{% endif %}
+  </div>
+</section>
+{% endblock %}

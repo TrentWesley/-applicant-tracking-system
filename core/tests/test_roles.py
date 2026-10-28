@@ -7,10 +7,11 @@ from core.roles import ADMIN, RECRUITER, grant_permissions, is_admin, role_name
 from core.tests.utils import make_admin, make_recruiter, make_user
 
 
-def group_perms(name):
-    return set(
-        Group.objects.get(name=name).permissions.values_list("content_type__app_label", "codename")
-    )
+def group_perms(name, app_label=None):
+    permissions = Group.objects.get(name=name).permissions.all()
+    if app_label:
+        permissions = permissions.filter(content_type__app_label=app_label)
+    return set(permissions.values_list("content_type__app_label", "codename"))
 
 
 class GroupMigrationTests(TestCase):
@@ -24,7 +25,7 @@ class GroupMigrationTests(TestCase):
 
     def test_admin_has_user_permissions_for_staff_management(self):
         self.assertEqual(
-            group_perms(ADMIN),
+            group_perms(ADMIN, "auth"),
             {("auth", "view_user"), ("auth", "add_user"), ("auth", "change_user")},
         )
 
@@ -33,7 +34,7 @@ class GroupMigrationTests(TestCase):
         self.assertNotIn(("auth", "delete_user"), group_perms(ADMIN))
 
     def test_recruiter_has_no_user_permissions(self):
-        self.assertEqual(group_perms(RECRUITER), set())
+        self.assertEqual(group_perms(RECRUITER, "auth"), set())
 
     def test_group_membership_grants_the_permission(self):
         self.assertTrue(make_admin().has_perm("auth.change_user"))

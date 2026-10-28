@@ -552,6 +552,127 @@ leftovers, secrets, quality gates and acceptance criteria, then a commit and pus
 
 ---
 
+## Entry 11
+
+**Date:** 2026-10-27
+
+**Phase:** Phase 2 implementation (Candidates: create, list, detail, edit)
+
+**Prompt:**
+```
+/implement Implement Phase 2 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Follow the exact Phase 2 scope: Candidate model and required/optional fields;
+candidate creation, listing, detail, and editing; required candidate source choices and optional
+source details; case-insensitive email uniqueness enforced at the database and form levels;
+Recruiter and Admin permissions; appropriate DaisyUI forms and templates. Requirements: strict TDD
+(Red-Green-Refactor); write failing tests before implementing each feature; cover Phase 2 user
+stories 6–10 and AC4–AC5; preserve Phase 1 functionality; run the complete test suite, Ruff lint
+and format checks, Django system checks, and migration checks; update PROMPTS.md; stop after
+Phase 2 for my review before committing or pushing. Do not start Phase 3.
+```
+
+**Result:**
+Claude Code built Phase 2 in four Red-Green cycles. Each cycle's tests were run and seen to fail
+for the expected reason before any code was written.
+
+1. **Model** (`candidates/tests/test_models.py`, 11 tests).
+   - **Red:** `candidates.models` didn't exist.
+   - **Green:** `Candidate` and the `Source` TextChoices (Referral, Company Website, Job Board,
+     LinkedIn, Career Fair, Agency, Other):
+     - required first name, last name, email and source;
+     - optional phone, source details, notes and "LinkedIn or portfolio URL";
+     - `archived_at` (null = active, not editable), `created_at` and `updated_at`;
+     - ordering by last name, then first name.
+   - **Database guard:** `UniqueConstraint(Lower("email"))` with the message "A candidate with
+     this email already exists." Tests show an IntegrityError for the same email in a different
+     case, and for an identical email.
+2. **Group permissions** (`test_permissions.py`, 3 tests).
+   - **Red:** the groups had no candidate permissions.
+   - **Green:** migration `0002_candidate_group_permissions` uses the Phase 1
+     `grant_permissions` helper. Recruiter gets view, add and change; Admin also gets delete.
+   - The migration reverses cleanly: `migrate candidates zero`, then re-migrate.
+   - Phase 1's group tests were narrowed to `auth` permissions, so they keep holding as each phase
+     adds model permissions.
+3. **Form** (`test_forms.py`, 16 tests).
+   - **Red:** `candidates.forms` didn't exist.
+   - **Green:** `CandidateForm`. Its `clean_email` uses `__iexact`, excluding the record being
+     edited, so the duplicate message appears on the email field. Once that field has an error,
+     Django skips the database-constraint check, so the message isn't repeated.
+   - **Tests cover (AC4, AC5):**
+     - each required field;
+     - optional fields left blank;
+     - an invalid URL, email or source;
+     - duplicates in another case, identical, and with surrounding spaces;
+     - editing without changing the email, or changing only its case;
+     - editing to another candidate's email;
+     - a posted `archived_at` is ignored.
+   - **Refactor:** a shared `DaisyUIFormMixin` in `core/forms.py`, which the Phase 1 login form
+     now uses too.
+4. **Views and templates** (`test_views.py`, 22 tests at first).
+   - **Red:** the URL names didn't exist.
+   - **Green:** generic CBVs with `PermissionRequiredMixin` and `raise_exception=True`:
+     - list (non-archived only) at `/candidates/`;
+     - detail at `/candidates/<pk>/`;
+     - create at `/candidates/new/`, redirecting to detail with a success message;
+     - edit at `/candidates/<pk>/edit/`, with the same validation as create (US 10).
+   - **DaisyUI templates:** a table with an empty state; a detail card with a mailto link, source
+     label, details and a notes card; and one shared form with a two-column grid that drops to one
+     column on phones.
+   - Add and Edit buttons are hidden from users without `add_candidate` or `change_candidate`.
+   - **Permission tests:**
+     - Recruiter and Admin can create, view, list and edit;
+     - a user with no role gets 403 on every page, and a forbidden POST writes nothing;
+     - a view-only user can view but gets 403 on create and edit;
+     - anonymous users are redirected to login.
+   - `_nav_link.html` gained an optional `section`, so "Candidates" stays highlighted on the
+     detail, create and edit pages too.
+
+**Visual check and accessibility fixes:**
+- Headless-Edge screenshots of the list, detail and an edit form showing a duplicate email and an
+  invalid URL matched the variant-A layout. All three pages have scroll width ≤ viewport width,
+  so nothing scrolls sideways. The sample data was created inside a rolled-back transaction, so
+  the local database stayed empty.
+- The screenshots showed low-contrast pink error text and no red border on invalid inputs.
+  Changes:
+  - error text uses `text-red-700`;
+  - one CSS rule borders inputs that have `aria-invalid="true"`.
+- **Bug found and fixed:** Django 6 points invalid inputs at `aria-describedby="id_<field>_error"`,
+  but no element had that id, so screen readers couldn't link a field to its error.
+  - **Red:** a test was added first and failed.
+  - **Fix:** the field partial now wraps errors in `<div id="id_<field>_error">`.
+
+**Verification:**
+- `ruff check` and `ruff format --check` are clean (the generated migration was formatted).
+- `manage.py check` reports no issues; `makemigrations --check` and `migrate --check` are clean.
+- **92 of 92 tests pass:** 38 from Phase 1 and 54 from Phase 2.
+- **Covered:** user stories 6–10; AC4 (form and database); AC5; and AC2/AC3 for candidate create
+  and edit.
+- **Not started, as planned:** archive, restore and delete (Phases 8 and 10), and applications on
+  the candidate page (Phase 4).
+
+**Feedback and decisions:**
+- I approved Phase 2.
+- **Documented limitation: concurrent duplicate-email race.**
+  - If two staff members save the same email at the same instant, both form checks can pass
+    before either row is written.
+  - The `Lower(email)` database constraint still refuses the second save, so no duplicate is
+    ever stored. That person would see a server error instead of the friendly form message.
+  - I decided to leave this as a documented limitation. Data integrity is protected, and
+    handling the race is outside the assignment's scope.
+- **Final review before committing:**
+  - no stubs, TODOs or duplicate code remain; the temporary detail-route stub from cycle 1 was
+    replaced;
+  - only later-phase sections still use placeholder pages;
+  - no credentials, `db.sqlite3`, built CSS, CLI binary or `__pycache__` are in the commit;
+  - `ruff check` and `ruff format --check` are clean, `manage.py check` reports no issues, and
+    `makemigrations --check` and `migrate --check` are clean;
+  - 92 of 92 tests pass.
+- Committed as "Phase 2: candidate management" and pushed to `main`. Phase 3 has not been
+  started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

@@ -35,7 +35,7 @@
       <nav aria-label="Main navigation">
         <ul class="menu w-full p-0">
           {% include "core/_nav_link.html" with route="core:dashboard" label="Dashboard" %}
-          {% include "core/_nav_link.html" with route="candidates:candidate_list" label="Candidates" %}
+          {% include "core/_nav_link.html" with route="candidates:candidate_list" label="Candidates" section="candidates" %}
           {% include "core/_nav_link.html" with route="jobs:job_list" label="Job Openings" %}
           {% include "core/_nav_link.html" with route="pipeline:application_list" label="Applications" %}
           {% if user_is_admin %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Candidates{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Candidates</h1>
+    <p class="text-sm text-base-content/70">Active candidates, by last name.</p>
+  </div>
+  {% if perms.candidates.add_candidate %}
+  <a href="{% url 'candidates:candidate_create' %}" class="btn btn-primary btn-sm">Add candidate</a>
+  {% endif %}
+</div>
+
+<section class="card bg-base-100 shadow-sm">
+  <div class="card-body p-0">
+    {% if candidates %}
+    <div class="overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Source</th><th scope="col">Added</th></tr>
+        </thead>
+        <tbody>
+          {% for candidate in candidates %}
+          <tr>
+            <td><a href="{{ candidate.get_absolute_url }}" class="link link-hover font-medium">{{ candidate }}</a></td>
+            <td>{{ candidate.email }}</td>
+            <td>{{ candidate.get_source_display }}</td>
+            <td class="whitespace-nowrap">{{ candidate.created_at|date:"M j, Y" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="p-6">No candidates yet.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

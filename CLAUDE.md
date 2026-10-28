@@ -43,7 +43,9 @@ uv run python manage.py check
 - `core`: base layout (DaisyUI drawer in `templates/base.html`), role helpers (`core/roles.py`),
   the `roles` context processor, shared badge partials, the dashboard. Test helpers live in
   `core/tests/utils.py` (`make_recruiter`, `make_admin`).
-- `candidates`: Candidate. `jobs`: JobOpening and Skill (`/jobs/` and `/skills/`).
+- `candidates`: Candidate (`/candidates/`, `/candidates/new/`, `/candidates/<pk>/`,
+  `/candidates/<pk>/edit/`); test helper `candidates.tests.utils.make_candidate`.
+- `jobs`: JobOpening and Skill (`/jobs/` and `/skills/`).
 - `pipeline`: Application, StageChange and the single **stage-change service**.
 - `staff`: staff management over Django's built-in `User` (no custom user model).
 
@@ -66,8 +68,18 @@ uv run python manage.py check
   `jobs:job_list`, `jobs:skill_list`, `pipeline:application_list`, `staff:staff_list`).
 - **Templates:** every page extends `base.html` and fills `title` and `content`; one `<h1>` per page.
   Nav links use `core/_nav_link.html`, which marks the current page with `menu-active` and
-  `aria-current="page"`. The drawer keeps `auto-cols-[max-content_minmax(0,1fr)]` so content never
-  scrolls sideways at phone width.
+  `aria-current="page"`; pass `section="<namespace>"` so every page in that app highlights the link.
+  The drawer keeps `auto-cols-[max-content_minmax(0,1fr)]` so content never scrolls sideways at
+  phone width.
+- **Forms:** ModelForms mix in `core.forms.DaisyUIFormMixin` (DaisyUI widget classes) and render
+  each field with `core/_field.html` (label, required `*`, help text, and errors in
+  `id_<field>_error`, which Django's `aria-describedby` points to). Invalid inputs get a red border
+  from the `aria-invalid` rule in `tailwind/source.css`.
+- **Views:** generic CBVs with `PermissionRequiredMixin` and `raise_exception = True` (403 for
+  signed-in users without the permission). Templates hide controls with `perms.<app>.<codename>`.
+- **Case-insensitive uniqueness:** a `UniqueConstraint(Lower(field))` in the model, plus a form
+  `clean_<field>` that checks `__iexact` (excluding the instance being edited) so the message sits
+  on the field.
 - **HTMX:** the CSRF token is sent on every HTMX request through `hx-headers` on `<body>`. Stage
   actions and notes edits return partials when `HX-Request` is set.
 - **Stage changes:** only through the stage-change service, with the check order: stale expected
