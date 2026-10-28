@@ -58,12 +58,12 @@ class JobListTests(StaffTestCase):
                 self.assertContains(response, "Python")
                 self.assertContains(response, ">Open<")
 
-    def test_closed_jobs_are_listed_with_a_closed_badge(self):
+    def test_closed_jobs_are_listed_with_a_job_closed_badge(self):
         make_job("Old Role", status=JobStatus.CLOSED)
         self.client.force_login(self.staff[0])
         response = self.client.get(LIST_URL)
         self.assertContains(response, "Old Role")
-        self.assertContains(response, ">Closed<")
+        self.assertContains(response, ">Job Closed<")
 
     def test_empty_list_says_so(self):
         self.client.force_login(self.staff[0])

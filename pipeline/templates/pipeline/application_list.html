@@ -34,7 +34,7 @@
           {% for application in applications %}
           <tr>
             <td><a href="{{ application.get_absolute_url }}" class="link link-hover font-medium">{{ application.candidate }}</a></td>
-            <td><a href="{{ application.job_opening.get_absolute_url }}" class="link link-hover">{{ application.job_opening }}</a></td>
+            <td><a href="{{ application.job_opening.get_absolute_url }}" class="link link-hover">{{ application.job_opening }}</a>{% if application.job_opening.status == "closed" %} {% include "core/_job_status_badge.html" with job=application.job_opening %}{% endif %}</td>
             <td>{% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %}</td>
             <td class="whitespace-nowrap">{{ application.stage_changed_at|date:"M j, Y" }}</td>
           </tr>

@@ -46,8 +46,8 @@ uv run python manage.py check
 - `candidates`: Candidate (`/candidates/`, `/candidates/new/`, `/candidates/<pk>/`,
   `/candidates/<pk>/edit/`); test helper `candidates.tests.utils.make_candidate`.
 - `jobs`: JobOpening and Skill (`/jobs/`, `/jobs/new/`, `/jobs/<pk>/`, `/jobs/<pk>/edit/`,
-  `/jobs/?skill=<pk>`; Admin-only `/skills/`, `/skills/new/`, `/skills/<pk>/edit/`,
-  `/skills/<pk>/delete/`); test helpers `jobs.tests.utils.make_skill` and `make_job`.
+  POST `/jobs/<pk>/close/` and `/jobs/<pk>/reopen/`, `/jobs/?skill=<pk>`; Admin-only `/skills/`,
+  `/skills/new/`, `/skills/<pk>/edit/`, `/skills/<pk>/delete/`); test helpers `jobs.tests.utils.make_skill` and `make_job`.
 - `pipeline`: Application, StageChange and the single **stage-change service**
   (`pipeline/services.py`: `create_application`, and `change_stage` for Advance, Back, Reject,
   Withdraw and Reactivate). Pages:
@@ -99,6 +99,12 @@ uv run python manage.py check
   check catches an assignment committed by another request during the delete.
 - **HTMX:** the CSRF token is sent on every HTMX request through `hx-headers` on `<body>`. Stage
   actions and notes edits return partials when `HX-Request` is set.
+- **Job status:** changes only through `jobs/services.py` (`close_job`, `reopen_job`): a
+  conditional `UPDATE … WHERE status = <from>`, so a repeated or stale request raises
+  `JobStatusUnchanged` ("already closed/open") and changes nothing. They never touch
+  applications; the stage-change service never checks job status except when creating.
+  `core/_job_status_badge.html` shows Open or **Job Closed**; the application list shows it only
+  for closed jobs, and a closed job's detail page notes how many active applications remain.
 - **Stage badges:** `core/_stage_badge.html` with `stage=` and `label=` (e.g.
   `label=application.get_stage_display`); one style each for early active stages, Offer, Hired, and
   Rejected/Withdrawn.

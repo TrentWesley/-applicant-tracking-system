@@ -3,12 +3,16 @@ from django.contrib.messages.views import SuccessMessageMixin
 from django.db import IntegrityError, transaction
 from django.db.models import Count, ProtectedError
 from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
+from django.views import View
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
 from core.views import StaffPermissionMixin
 from jobs.forms import JobFilterForm, JobOpeningForm, SkillForm
-from jobs.models import JobOpening, Skill
+from jobs.models import JobOpening, JobStatus, Skill
+from jobs.services import JobStatusUnchanged, close_job, reopen_job
+from pipeline.models import ACTIVE_STAGES
 
 
 class JobListView(StaffPermissionMixin, ListView):
@@ -36,6 +40,42 @@ class JobDetailView(StaffPermissionMixin, DetailView):
     queryset = JobOpening.objects.prefetch_related("skills")
     context_object_name = "job"
     template_name = "jobs/job_detail.html"
+
+    def get_context_data(self, **kwargs):
+        # Shown only on a closed job: unfinished work that still needs attention (US 23).
+        active_count = 0
+        if self.object.status == JobStatus.CLOSED:
+            active_count = self.object.applications.filter(stage__in=ACTIVE_STAGES).count()
+        return super().get_context_data(active_count=active_count, **kwargs)
+
+
+class JobStatusActionView(StaffPermissionMixin, View):
+    """POST-only Close or Reopen; the detail page reloads with the outcome."""
+
+    permission_required = "jobs.change_jobopening"
+    http_method_names = ["post"]
+    change = None  # close_job or reopen_job
+    success_message = ""
+
+    def post(self, request, pk):
+        job = get_object_or_404(JobOpening, pk=pk)
+        try:
+            self.change(job)
+        except JobStatusUnchanged as refusal:
+            messages.error(request, str(refusal))
+        else:
+            messages.success(request, self.success_message.format(job=job))
+        return redirect(job)
+
+
+class JobCloseView(JobStatusActionView):
+    change = staticmethod(close_job)
+    success_message = "{job} closed. It no longer accepts new applications."
+
+
+class JobReopenView(JobStatusActionView):
+    change = staticmethod(reopen_job)
+    success_message = "{job} reopened. It accepts new applications again."
 
 
 class JobCreateView(StaffPermissionMixin, SuccessMessageMixin, CreateView):

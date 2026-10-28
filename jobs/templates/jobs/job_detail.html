@@ -9,9 +9,21 @@
     <h1 class="text-2xl font-bold">{{ job }}</h1>
   </div>
   {% if perms.jobs.change_jobopening %}
-  <a href="{% url 'jobs:job_update' job.pk %}" class="btn btn-sm">Edit</a>
+  <div class="flex flex-wrap gap-2">
+    <a href="{% url 'jobs:job_update' job.pk %}" class="btn btn-sm">Edit</a>
+    {# Close and Reopen are the only way status changes; each is a plain POST. #}
+    {% if job.status == "closed" %}
+    <form method="post" action="{% url 'jobs:job_reopen' job.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm btn-primary">Reopen job</button></form>
+    {% else %}
+    <form method="post" action="{% url 'jobs:job_close' job.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm btn-outline">Close job</button></form>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
+
+{% if active_count %}
+<div class="alert alert-warning" role="note">This job is closed but still has {{ active_count }} active application{{ active_count|pluralize }}.</div>
+{% endif %}
 
 <section class="card bg-base-100 shadow-sm" aria-labelledby="details-heading">
   <div class="card-body">

@@ -1,1 +1,1 @@
-<span class="badge badge-sm {% if job.status == 'closed' %}badge-neutral{% else %}badge-success{% endif %}">{{ job.get_status_display }}</span>
+<span class="badge badge-sm {% if job.status == 'closed' %}badge-warning{% else %}badge-success{% endif %}">{% if job.status == 'closed' %}Job Closed{% else %}{{ job.get_status_display }}{% endif %}</span>

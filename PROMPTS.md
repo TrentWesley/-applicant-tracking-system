@@ -1517,6 +1517,194 @@ begin Phase 7 yet.
 
 ---
 
+## Entry 18
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 7 implementation (Close and reopen jobs)
+
+**Prompt:**
+```
+/implement Implement Phase 7 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Follow the exact Phase 7 scope: add dedicated Close and Reopen actions for
+job openings; ensure new job openings default to Open; keep job status changes out of the
+general create/edit forms; closing a job must prevent new applications from being created for
+that job; existing applications on a Closed job must remain visible and retain their complete
+stage history; existing applications on a Closed job must still be able to Advance, move Back,
+Reject, Withdraw, and Reactivate, following all existing stage rules; reopening a job must allow
+new applications again without changing existing applications or their history; preserve the
+rule that Reactivate is allowed on Closed jobs unless the candidate is archived; require
+appropriate Recruiter or Admin permissions for Close and Reopen; display the correct Open or
+Closed status and available actions in the job interface; handle stale or repeated Close/Reopen
+requests safely and provide clear feedback. Requirements: strict TDD (Red-Green-Refactor); write
+failing tests before implementing each feature; follow the exact Phase 7 user stories and
+acceptance criteria; preserve Phases 1–6; do not implement candidate Archive/Restore (Phase 8)
+or Admin permanent deletion (Phase 10); run the complete test suite, Ruff lint and format checks,
+Django system checks, and migration checks; update PROMPTS.md; stop after Phase 7 for my review
+before committing or pushing. Do not begin Phase 8.
+```
+
+**Result:**
+Claude Code built Phase 7 in one Red-Green cycle. Phase 3 had already made `status`
+`editable=False`, defaulted it to Open and kept it off the job forms, and its tests already proved
+that a posted status is ignored on create and edit (AC11). Those tests still pass unchanged.
+
+1. **Red:** two new test files, plus one deliberate change to a Phase 3 test.
+   - `jobs/tests/test_close_reopen.py` (21 tests) failed to import `jobs.services`.
+   - `pipeline/tests/test_closed_jobs.py` (11 tests) failed because the `job_close` route didn't
+     exist.
+   - The Phase 3 job-list test now expects the PRD's ">Job Closed<" wording instead of
+     ">Closed<".
+2. **Green:**
+   - **`jobs/services.py`:**
+     - `close_job(job)` and `reopen_job(job)` each run one conditional
+       `UPDATE … WHERE pk = … AND status = <from>`. It sets the new status and `updated_at`
+       (`.update()` skips `auto_now`), then refreshes the job in place.
+     - If no row changed (a double-click, a second tab, or a stale page), they raise
+       `JobStatusUnchanged`: "This job is already closed, so nothing was changed." or "…already
+       open…".
+     - They never touch applications or history.
+   - **Views:** `JobCloseView` and `JobReopenView` at POST `/jobs/<pk>/close/` and `/reopen/`
+     (the plan's URLs).
+     - They share a small `JobStatusActionView`: POST only (GET gets 405), and
+       `jobs.change_jobopening` is required (403 otherwise; Recruiter and Admin both have it).
+     - Each redirects to the job with a success message ("Data Analyst closed. It no longer
+       accepts new applications.") or the refusal as an error message.
+   - **Job detail:**
+     - an open job shows "Close job"; a closed one shows "Reopen job" (both hidden without the
+       change permission);
+     - a closed job with active applications shows "This job is closed but still has N active
+       application(s)." (US 23).
+   - **Badge:** `core/_job_status_badge.html` now reads **Job Closed** for closed jobs, as the
+     PRD names it, and still reads Open for open ones. The application list adds the badge
+     next to the job only for applications on closed jobs. The application detail page already
+     showed it.
+   - **Unchanged:** the stage-change service. It checks job status only when creating, so
+     moves and Reactivate on a closed job already worked.
+3. **Refactor:** the two action views store their service function with `staticmethod`.
+4. **Mutation check:** making the job UPDATE unconditional turned 5 tests red (repeated, stale
+   and double requests). The original was restored.
+
+**Tests (AC12, AC13, AC25 closed-job part, US 21–24 and 40):**
+- **Close and Reopen:** status and `updated_at` change; repeated and stale requests are refused
+  and change nothing; and no application's stage, stage time or history count changes,
+  including another job's.
+- **Through the real Close action:**
+  - new applications are refused by the form ("Choose an open job…") and the service;
+  - the create form stops offering the job;
+  - after Reopen, another candidate can apply, but the existing pair is still refused as a
+    duplicate.
+- **Moves on a closed job:** Advance, Back, Reject, Withdraw and Hire all work over HTMX, and the
+  job stays Closed. The usual rules still apply (Back from Applied, a missing note). The stage
+  card still offers the moves, and the full history stays visible.
+- **Walkthrough 6:**
+  - a Reject on a closed job is undone with one Reactivate, which writes one StageChange;
+  - the job stays Closed, and a new applicant is still refused.
+- **Badges and note:**
+  - Job Closed appears only on closed-job rows in the application list, including a
+    stage-filtered list;
+  - the note appears for 1 and for 2 active applications, but not on open jobs or on closed
+    jobs where everything is terminal.
+- **Permissions:** Recruiter and Admin can close and reopen (AC2). A view-only user gets 403 and
+  sees no buttons; an anonymous user is sent to login; an unknown job gets 404.
+
+**Browser check:**
+- A throwaway server ran on scratch settings and a scratch database, which was deleted
+  afterwards. The Tailwind CSS was rebuilt for `badge-warning` and `alert-warning` (gitignored
+  output).
+- Headless Chrome clicked the real "Close job" button. The page reloaded with the success
+  message, a "Reopen job" button, the yellow Job Closed badge, and "This job is closed but still
+  has 1 active application."
+
+**Verification:**
+- **390 of 390 tests pass:** 358 from Phases 1–6 and 32 new.
+- `ruff check` and `ruff format --check` are clean (96 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` and `migrate --check` are clean. Phase 7 needed no
+  migration.
+- **Not started, as planned:** candidate Archive and Restore (Phase 8); Admin permanent deletes
+  (Phase 10); the job detail's applications list and hired count, and Job Closed on the
+  dashboard and candidate pages (Phase 9).
+
+**Decisions to review:**
+- **No confirmation step for Close or Reopen.** Each is a single POST button, because Reopen
+  undoes Close exactly and neither changes any application.
+- **The status badge now reads "Job Closed"** wherever it appears (job list, job detail,
+  application detail, the skill-delete page's list of jobs). Open jobs still read "Open". On
+  the application list, only closed jobs get a badge.
+- **Repeated or stale requests show an error message,** like stage refusals, not a silent
+  success.
+
+---
+
+## Entry 19
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 7 approval, final review, commit and push
+
+**Prompt:**
+```
+I approve Phase 7 and all three implementation decisions. Before committing: review all Phase 7
+changes for leftover stubs, duplicate code, accidental changes, and formatting issues; confirm
+that Close and Reopen only change the job's status and updated timestamp, without modifying
+existing applications or their stage history; confirm that new applications are blocked on
+Closed jobs and allowed again after Reopen; confirm that existing applications on Closed jobs can
+still Advance, move Back, Reject, Withdraw, and Reactivate; confirm that stale requests, repeated
+actions, and permissions are handled correctly; confirm no credentials, local database files,
+generated CSS, or build artifacts are included; run the complete automated test suite, Ruff lint
+and format checks, Django system checks, and migration checks; update PROMPTS.md with my
+approval, the three decisions, and final verification results. Commit with the message "Phase 7:
+close and reopen job openings". Push to the existing GitHub main branch. Report the final test
+count, commit hash, push status, and any remaining issues. Do not begin Phase 8 yet.
+```
+
+**Approved decisions:**
+1. Close and Reopen are single POST buttons with no confirmation step.
+2. The shared status badge reads "Job Closed" for closed jobs everywhere, and "Open" for open
+   ones. The application list shows it only for applications on closed jobs.
+3. A repeated or stale Close/Reopen shows an error message ("already closed/open, so nothing was
+   changed").
+
+**Final review:**
+- **No leftovers:** no stubs, TODOs or debug output, and no duplicate code. Changes are limited
+  to the jobs service, views, URLs and detail template; the shared badge; the application list;
+  the tests; `CLAUDE.md` and `PROMPTS.md`.
+- **One formatting fix:** the `jobs` line in CLAUDE.md was re-wrapped to the file's width.
+- **Close and Reopen change only the job:** `_set_status` updates only `status` and
+  `updated_at` on the one job row. A test records every application's stage, stage time and
+  history count on that job, closes and reopens it, and finds them identical. The total
+  StageChange count and another job's status are unchanged too.
+- **New applications:**
+  - after a real Close, the form ("Choose an open job…") and the service both refuse, and the
+    form stops offering the job;
+  - after Reopen, a new candidate's application is accepted, and a duplicate pair is still
+    refused.
+- **Moves on a closed job:**
+  - Advance, Back, Reject, Withdraw and Hire all succeed over HTMX, and the job stays Closed;
+  - Reactivate after a Reject on a closed job writes one StageChange, and the job stays Closed
+    and still refuses newcomers;
+  - the usual rules still apply.
+- **Stale, repeated and permissions:** the conditional UPDATE refuses a repeated or stale
+  request and changes nothing (mutation-checked). GET gets 405, a view-only user gets 403 with
+  no change, an anonymous user is sent to login, and an unknown job gets 404. Recruiter and Admin
+  can both close and reopen.
+- **Nothing sensitive or generated:** `db.sqlite3`, `assets/css/tailwind.css`, `.env`, `.venv` and
+  `.django_tailwind_cli` are gitignored and none is in the change set. A scan found no
+  credentials.
+
+**Final verification:**
+- **390 of 390 tests pass:** 358 from Phases 1–6 and 32 from Phase 7.
+- `ruff check` and `ruff format --check` are clean (96 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Result:** committed as "Phase 7: close and reopen job openings" and pushed to `main`. Phase 8
+not started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:
