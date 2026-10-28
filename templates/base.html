@@ -1,0 +1,68 @@
+{% load static tailwind_cli %}<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · Applicant Tracking</title>
+  {% tailwind_css %}
+  <script src="{% static 'js/htmx.min.js' %}" defer></script>
+</head>
+<body class="bg-base-200" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+{% block body %}
+<a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 focus:btn">Skip to content</a>
+<div class="drawer lg:drawer-open auto-cols-[max-content_minmax(0,1fr)]">
+  <input id="nav-drawer" type="checkbox" class="drawer-toggle">
+  <div class="drawer-content flex min-h-screen flex-col">
+    <header class="navbar border-b border-base-300 bg-base-100 lg:hidden">
+      <label for="nav-drawer" aria-label="Open navigation menu" class="btn btn-square btn-ghost">☰</label>
+      <span class="ml-2 font-semibold">Applicant Tracking</span>
+    </header>
+    <main id="main" class="w-full max-w-6xl space-y-6 p-4 md:p-8">
+      {% if messages %}
+      <div class="space-y-2" role="status">
+        {% for message in messages %}
+        <div class="alert {% if message.level_tag == 'error' %}alert-error{% elif message.level_tag == 'success' %}alert-success{% else %}alert-info{% endif %}">{{ message }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <div class="drawer-side z-40">
+    <label for="nav-drawer" aria-label="Close navigation menu" class="drawer-overlay"></label>
+    <aside class="flex min-h-full w-64 flex-col border-r border-base-300 bg-base-100 p-4">
+      <div class="mb-4 px-2 text-lg font-bold">Applicant Tracking</div>
+      <nav aria-label="Main navigation">
+        <ul class="menu w-full p-0">
+          {% include "core/_nav_link.html" with route="core:dashboard" label="Dashboard" %}
+          {% include "core/_nav_link.html" with route="candidates:candidate_list" label="Candidates" %}
+          {% include "core/_nav_link.html" with route="jobs:job_list" label="Job Openings" %}
+          {% include "core/_nav_link.html" with route="pipeline:application_list" label="Applications" %}
+          {% if user_is_admin %}
+          <li class="menu-title mt-4">Admin</li>
+          {% include "core/_nav_link.html" with route="jobs:skill_list" label="Skills" %}
+          {% include "core/_nav_link.html" with route="staff:staff_list" label="Staff Management" %}
+          {% endif %}
+        </ul>
+      </nav>
+      <div class="mt-auto border-t border-base-300 pt-4">
+        <div class="flex items-center gap-3 px-2">
+          <div class="avatar avatar-placeholder" aria-hidden="true">
+            <div class="w-9 rounded-full bg-neutral text-neutral-content"><span class="text-xs">{{ user.get_username|first|upper }}</span></div>
+          </div>
+          <div class="text-sm">
+            <div class="font-medium">{{ user.get_full_name|default:user.get_username }}</div>
+            <div class="text-xs text-base-content/70">{{ user_role|default:"No role" }}</div>
+          </div>
+        </div>
+        <form method="post" action="{% url 'logout' %}" class="mt-3">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-ghost btn-sm w-full justify-start">Log out</button>
+        </form>
+      </div>
+    </aside>
+  </div>
+</div>
+{% endblock %}
+</body>
+</html>

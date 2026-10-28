@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Tailwind CLI binary and built stylesheet (rebuilt by `manage.py tailwind build`)
+.django_tailwind_cli/
+assets/css/tailwind.css

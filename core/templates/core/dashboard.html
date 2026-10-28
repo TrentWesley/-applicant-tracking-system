@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div>
+  <h1 class="text-2xl font-bold">Dashboard</h1>
+  <p class="text-sm text-base-content/70">Welcome, {{ user.get_short_name|default:user.get_username }}.</p>
+</div>
+
+<section class="card bg-base-100 shadow-sm">
+  <div class="card-body">
+    <h2 class="card-title">Hiring overview</h2>
+    <p>Summary counts, the hiring pipeline, items that need attention and recent activity will appear here once candidates, job openings and applications are being tracked.</p>
+  </div>
+</section>
+{% endblock %}

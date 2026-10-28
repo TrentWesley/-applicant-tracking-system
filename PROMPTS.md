@@ -423,6 +423,135 @@ Claude Code followed the skill's steps:
 
 ---
 
+## Entry 10
+
+**Date:** 2026-10-27
+
+**Phase:** Phase 1 implementation (project setup, login, roles and sidebar layout)
+
+**Prompt:**
+```
+/implement Implement Phase 1 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read: prd/applicant-tracking-system.md,
+plans/applicant-tracking-system.md, PROMPTS.md, both prototype findings documents. Follow the
+approved Phase 1 scope exactly: Django project setup, authentication, Recruiter/Admin roles,
+sidebar layout, and initial dashboard. Requirements: use the approved technology stack and
+architecture; follow strict Test-Driven Development (Red-Green-Refactor); resolve the
+group-permissions initialization detail with automated tests; implement only Phase 1, do not
+begin Phase 2; run Ruff, Django system checks, and the relevant automated tests; update PROMPTS.md
+to document the implementation process; summarize files created, tests passed, any issues, and
+the Git commit status. Stop after Phase 1 for my review.
+```
+
+**Result:**
+
+*Setup.*
+- `uv init` gave a Python 3.14 project. `uv add` installed Django 6.1.2 (meets "≥ 5.1") and
+  django-tailwind-cli 4.8.2; Ruff 0.17.3 is a dev dependency.
+- `startproject config` plus the five apps: `core`, `candidates`, `jobs`, `pipeline` and `staff`.
+- `django.contrib.admin` was removed on purpose. It would be a back door around the permission
+  rules and the append-only StageChange history.
+
+*Red.*
+- 37 tests were written first, in `core/tests/`:
+  - `test_auth`: anonymous redirects (AC1), the login page, landing on the dashboard, `?next=`,
+    wrong password, inactive user refused, and logout POST-only.
+  - `test_roles`: both groups exist, the group permissions, the `grant_permissions` helper and the
+    role helpers.
+  - `test_layout`: drawer, accessible ☰ label, four main links, Admin group only for Admins
+    (AC3), user and role, HTMX CSRF header, Tailwind link, login page without a sidebar.
+  - `test_placeholders`: section pages; Recruiter 403 on Skills and Staff.
+- First run: every module failed to import `core.roles`. After a compile-only stub
+  (`NotImplementedError`), the run showed **7 failures and 35 errors, each for the expected reason**:
+  404s instead of login redirects, missing groups, unknown URL names, and the stubbed helpers.
+
+*Green.*
+- `LoginRequiredMiddleware`, Django's `LoginView` and `LogoutView`, and a DaisyUI-styled login
+  form. `LOGIN_REDIRECT_URL` is the dashboard.
+- `core/roles.py`: `is_admin`, `role_name`, `@admin_required` and `grant_permissions`. A context
+  processor puts `user_role` and `user_is_admin` in every template.
+- `base.html`: the variant-A DaisyUI drawer, a labelled ☰ toggle, nav links that mark the current
+  page, the Admin group rendered only for Admins, the user and role, a POST logout form, and
+  `hx-headers` with the CSRF token.
+- The dashboard view at `/`, and placeholder pages for Candidates, Job Openings, Applications,
+  Skills and Staff, so every nav link is a real, login-protected route. Skills and Staff are
+  Admin-only.
+- htmx 2.0.11 is a pinned static copy. Tailwind builds through the pinned `tailwind-cli-extra`
+  2.10.34 binary, which bundles DaisyUI.
+
+**Group-permissions initialization detail (resolved, tested):**
+- **Problem:** Django creates model permissions in a `post_migrate` signal, after *every* migration
+  has run. On a fresh database, a data migration can't look them up.
+- **Solution:** `grant_permissions(apps, group, app_label, model_name, actions)` first creates any
+  missing content type and permission row, with the same codename and name Django uses, then
+  adds it to the group. The signal later finds the rows and creates no duplicates.
+- **Phase 1 migration (`core/0001_create_role_groups`):** creates both groups and gives Admin
+  view, add and change on `auth.User` for Staff Management. There's no delete permission, because
+  staff are deactivated, never deleted. Each later model migration will attach its own
+  permissions with the same helper.
+- **Tests:**
+  - the test database is built by running the migrations, so the group tests prove it works on a
+    fresh database;
+  - after deleting the `auth.user` permissions, the helper recreates and assigns them;
+  - running the helper twice is idempotent;
+  - running Django's `create_permissions` afterwards adds no duplicates.
+- **Also checked by hand:** `migrate core zero` removes both groups, and re-migrating restores them.
+
+**Issue found and fixed: sideways scrolling at phone width.**
+- Headless Edge showed the dashboard card clipped on small screens.
+- Measuring showed the cause: DaisyUI's drawer puts the content in a `max-content` grid column, so
+  long text widened the page to 1097px. This is the same bug the UI prototype found.
+- **Red:** a regression test was added first and failed.
+- **Fix:** `auto-cols-[max-content_minmax(0,1fr)]` on the drawer. The scroll width now equals the
+  viewport width, and the desktop layout is unchanged (256px sidebar, 1000px content).
+
+*Refactor.*
+- Removed the startproject boilerplate (empty `models.py`, `tests.py` and `admin.py`), and moved
+  the Tailwind source CSS out of `STATICFILES_DIRS` to clear a django-tailwind-cli warning.
+- `SECRET_KEY` is read from `DJANGO_SECRET_KEY`, with a development fallback.
+- `CLAUDE.md` documents the stack, commands, TDD rule, app ownership and conventions.
+
+**Verification:**
+- `ruff check` and `ruff format --check` are clean, and `manage.py check` reports no issues.
+- `makemigrations --check` reports no changes, and **38 of 38 tests pass**.
+- **Live server smoke test:**
+  - anonymous `/` redirects to login;
+  - the CSS and htmx files are served;
+  - a Recruiter logs in and lands on `/`, sees no Staff Management link, and gets 403 on `/staff/`.
+
+**Feedback and decisions:**
+I approved Phase 1 and its four implementation decisions:
+1. Superusers count as Admin, which bootstraps the first account through `createsuperuser`.
+2. Placeholder section pages exist until their phases replace them. Skills and Staff are already
+   Admin-only.
+3. `django.contrib.admin` isn't installed.
+4. The built CSS and the Tailwind CLI binary are gitignored and rebuilt with
+   `manage.py tailwind build`.
+
+**Final review before committing** (my follow-up prompt asked for a check of stubs, scaffold
+leftovers, secrets, quality gates and acceptance criteria, then a commit and push):
+- **Stubs:** `core/roles.py` has no `NotImplementedError` stubs or unreachable code. No TODOs or
+  startproject leftovers remain in the settings, URLs or apps.
+- **Secrets:** only throwaway test passwords are committed, and they exist only in the test
+  database. Local demo accounts live only in the gitignored `db.sqlite3`. Built CSS, the CLI
+  binary and `__pycache__` are excluded.
+- **Fix:** the startproject-generated `SECRET_KEY` fallback looked like a real secret, so it was
+  replaced with an obvious placeholder, `django-insecure-local-development-only`. Production
+  reads `DJANGO_SECRET_KEY`.
+- **Quality gates:**
+  - `ruff check` and `ruff format --check` are clean;
+  - `manage.py check` reports no issues;
+  - `makemigrations --check` and `migrate --check` are clean;
+  - **38 of 38 tests pass**.
+- **Acceptance criteria:**
+  - AC1: every page redirects anonymous users to login;
+  - AC3 (navigation part): Admin links render only for Admins;
+  - AC45: the quality gate is set up.
+- Committed as "Phase 1: project setup, login, roles and sidebar layout" and pushed to `main`.
+  Phase 2 has not been started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

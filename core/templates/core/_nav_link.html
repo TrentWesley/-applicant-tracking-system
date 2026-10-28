@@ -1,0 +1,1 @@
+{% url route as href %}<li><a href="{{ href }}"{% if request.resolver_match.view_name == route %} class="menu-active" aria-current="page"{% endif %}>{{ label }}</a></li>
