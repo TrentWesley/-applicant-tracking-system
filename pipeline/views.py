@@ -3,6 +3,7 @@ from typing import NamedTuple
 from django.contrib import messages
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.cache import patch_vary_headers
 from django.utils.functional import cached_property
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView
@@ -12,10 +13,12 @@ from core.views import StaffPermissionMixin
 from pipeline.forms import ApplicationForm
 from pipeline.models import Application, Stage
 from pipeline.services import (
+    NoteRequired,
     StageChangeRefused,
     available_moves,
     change_stage,
     create_application,
+    reactivation_target,
 )
 
 
@@ -24,11 +27,20 @@ class Feedback(NamedTuple):
     text: str
 
 
-def stage_card_context(application, feedback=None):
-    """What the stage card and the history table need, on the detail page and after a move."""
+def stage_card_context(application, feedback=None, confirm="", focus=""):
+    """
+    What the stage card and the history table need, on the detail page and after a move.
+    `confirm` names a note-requiring action whose inline note form should be open; `focus` names
+    one whose link gets keyboard focus (after Cancel). Both are ignored unless that action is
+    allowed from the current stage.
+    """
+    moves = available_moves(application.stage, reactivation_target(application))
+    note_moves = {m.action: m for m in moves if m.needs_note}
     return {
         "application": application,
-        "moves": available_moves(application.stage),
+        "moves": moves,
+        "confirming": note_moves.get(confirm),
+        "focus": focus if focus in note_moves else "",
         "history": application.stage_changes.select_related("changed_by"),
         "feedback": feedback,
     }
@@ -90,14 +102,33 @@ class ApplicationDetailView(StaffPermissionMixin, DetailView):
     context_object_name = "application"
     template_name = "pipeline/application_detail.html"
 
+    def get_template_names(self):
+        # The note links and Cancel fetch just the card over HTMX (`?confirm=<action>` opens a
+        # note form); without HTMX the same links load the whole page.
+        if self.request.headers.get("HX-Request"):
+            return ["pipeline/_stage_card.html"]
+        return super().get_template_names()
+
     def get_context_data(self, **kwargs):
-        return super().get_context_data(**stage_card_context(self.object), **kwargs)
+        card = stage_card_context(
+            self.object,
+            confirm=self.request.GET.get("confirm", ""),
+            focus=self.request.GET.get("focus", ""),
+        )
+        return super().get_context_data(**card, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        response = super().get(request, *args, **kwargs)
+        # The URL serves both the page and the card, so caches must keep them apart.
+        patch_vary_headers(response, ["HX-Request"])
+        return response
 
 
 class ApplicationTransitionView(StaffPermissionMixin, View):
     """
-    POST action + expected_stage (hidden fields on the stage card). With HTMX the refreshed card
-    comes back, plus the history table out of band; without it, the detail page reloads.
+    POST action + expected_stage (hidden fields on the stage card), plus a note for Reject,
+    Withdraw and Reactivate. With HTMX the refreshed card comes back, plus the history table out
+    of band; without it, the detail page reloads. A missing note keeps the note form open.
     """
 
     permission_required = "pipeline.change_application"
@@ -105,16 +136,20 @@ class ApplicationTransitionView(StaffPermissionMixin, View):
 
     def post(self, request, pk):
         application = get_object_or_404(Application, pk=pk)
+        action = request.POST.get("action", "")
+        confirm = ""
         try:
             move = change_stage(
                 application=application,
-                action=request.POST.get("action", ""),
+                action=action,
                 expected_stage=request.POST.get("expected_stage", ""),
                 changed_by=request.user,
                 note=request.POST.get("note", ""),
             )
         except StageChangeRefused as refusal:
             feedback = Feedback(ok=False, text=str(refusal))
+            if isinstance(refusal, NoteRequired):
+                confirm = action
             # A stale refusal means another request moved it; show where it is now.
             application.refresh_from_db()
         else:
@@ -122,8 +157,10 @@ class ApplicationTransitionView(StaffPermissionMixin, View):
             feedback = Feedback(ok=True, text=f"Moved from {moved}.")
 
         if request.headers.get("HX-Request"):
-            context = stage_card_context(application, feedback)
+            context = stage_card_context(application, feedback, confirm)
             return render(request, "pipeline/_transition_response.html", context)
         level = messages.SUCCESS if feedback.ok else messages.ERROR
         messages.add_message(request, level, feedback.text)
+        if confirm:
+            return redirect(f"{application.get_absolute_url()}?confirm={confirm}")
         return redirect(application)

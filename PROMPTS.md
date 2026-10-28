@@ -1284,6 +1284,239 @@ started.
 
 ---
 
+## Entry 16
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 6 implementation (Reject, Withdraw and Reactivate; Hired is permanent)
+
+**Prompt:**
+```
+/implement Implement Phase 6 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Follow the exact Phase 6 scope: allow active applications to be Rejected or
+Withdrawn; require a nonblank reason for rejection and withdrawal; allow Rejected and Withdrawn
+applications to be reactivated to their most recent active hiring stage; require a nonblank
+reason for reactivation; prevent reactivation when the candidate is archived; allow reactivation
+even when the job opening is Closed, as specified in the approved PRD; keep Hired permanent and
+prevent Reject, Withdraw, or Reactivate from Hired; record each successful action as an
+immutable StageChange entry, including its reason, actor, timestamp, previous stage, and new
+stage; extend the existing atomic stage-change service, preserving stale-request and
+double-click protections; add the appropriate forms and HTMX controls to the application detail
+page; enforce Recruiter and Admin permissions server-side. Requirements: strict TDD
+(Red-Green-Refactor); write failing tests before implementing each feature; follow the exact
+Phase 6 user stories and acceptance criteria; preserve Phases 1–5; do not implement job
+Close/Reopen or candidate Archive/Restore (Phases 7 and 8); run the complete test suite, Ruff lint
+and format checks, Django system checks, and migration checks; update PROMPTS.md; stop after
+Phase 6 for my review before committing or pushing. Do not begin Phase 7.
+```
+
+**Result:**
+Claude Code built Phase 6 in two Red-Green cycles, ran two mutation checks, then checked the
+HTMX behaviour in a real browser.
+
+1. **Stage-change service: Reject, Withdraw and Reactivate** (`test_transitions.py`, 40 tests,
+   up from 18).
+   - **Red:** the tests failed to import `NoteRequired`, `Move` and `reactivation_target`.
+   - **Green:**
+     - **`Action`** gained Reject, Withdraw and Reactivate. Reject and Withdraw join the
+       `TRANSITIONS` table from all five active stages.
+     - **Reactivate** is allowed only from Rejected and Withdrawn. Its target comes from the
+       history: `reactivation_target()` returns the `from_stage` of the latest StageChange.
+       Only reactivation can leave Rejected or Withdrawn, so that entry is always the exit move.
+       If the history doesn't end in that exit (only test setup can cause this), the service
+       refuses rather than guess.
+     - **Check order:** (1) stale, (2) allowed (Hired gets "Hired is permanent" for every
+       action), (3) required note after trimming, which raises `NoteRequired`, a subclass of
+       `StageChangeRefused`, (4) for Reactivate, the candidate isn't archived. A closed job is
+       not checked, and reactivation never changes its status.
+     - The write is unchanged: the same conditional `UPDATE … WHERE stage = expected` and exactly
+       one StageChange (with the trimmed note) per updated row.
+     - **`available_moves(stage, reactivate_to=None)`** adds Reactivate for Rejected and
+       Withdrawn. `Move.label` gives "Reject", "Reactivate to Interview" and so on, and
+       `Move.needs_note` tells the card which moves open a note form.
+   - **Tests:**
+     - **AC21:** Reject and Withdraw from every active stage; Reactivate from Rejected and from
+       Withdrawn, each with one correct StageChange.
+     - **AC22:** Reactivate from each active stage; Reject, Withdraw, Advance and Back from
+       Rejected and Withdrawn.
+     - **AC23:** empty, spaces-only and newline/tab notes refused for all three; Advance and
+       Back still need no note.
+     - **AC24:** Interview → Rejected → back to Interview, then Final Review → Withdrawn → back
+       to Final Review, then Screening → Rejected → back to Screening (10 history rows).
+     - **AC25:** an archived candidate blocks Reactivate; a closed job doesn't, and stays
+       Closed; every action from Hired is refused, even with a note.
+     - **AC26:** hiring leaves the other application for that job, the candidate's application
+       for another job, the job's status and the candidate unchanged.
+     - **Order:** stale before the note ("already updated", not "note required"); allowed
+       before the note; the note before the archived guard.
+     - **Double-click:** a repeated Reject writes one entry.
+   - **Mutation checks:**
+     - Disabling the required-note check turned 10 subtests red.
+     - Reading the oldest exit entry instead of the latest turned the repeated-cycles test red.
+     - Both were restored.
+2. **Inline note forms over HTMX** (`test_transition_views.py`, 45 tests, up from 23).
+   - **Red:** 20 failures; the card had no note links or form. One error was a test bug:
+     the base setUp's job made `JobOpening.objects.get()` ambiguous, so it now uses the pk.
+   - **Green:**
+     - **Card:** Advance and Back stay single-click forms. Reject, Withdraw and Reactivate are
+       links to `/applications/<pk>/?confirm=<action>` with `hx-get`, which swap in the card
+       with the note form open.
+     - **Note form:** a fieldset ("Reject this application"; Reactivate adds "Returns to
+       Interview."), a required, autofocused "Reason" textarea, Confirm, and Cancel (which
+       re-fetches the card). It posts `action`, `expected_stage` and `note` to the existing
+       transition endpoint, with `hx-disabled-elt`.
+     - **No new URLs:** `ApplicationDetailView` returns just `_stage_card.html` when
+       `HX-Request` is set, and sends `Vary: HX-Request` so caches keep the page and the card
+       apart. Without HTMX, the same links open the full page with the form.
+     - **Refusals:** a `NoteRequired` refusal keeps the form open with `aria-invalid="true"`
+       pointing at the alert. Without HTMX it redirects to `?confirm=<action>` with the
+       message. Every other refusal (stale, archived, Hired) closes the form and shows the
+       reason.
+     - `?confirm=` is ignored for actions the stage doesn't allow, and for users without the
+       change permission.
+   - **Tests:** the card's links and forms for all eight stages (AC29); the note form as a
+     partial; Cancel; the no-JavaScript fallback; Reject, Withdraw and Reactivate end to end;
+     a blank note keeps the form open; a stale Reject without a note says "already updated";
+     a double-clicked Confirm; archived-candidate and closed-job reactivation; Hired refuses all
+     three; and 403 for view-only users.
+   - **One Phase 5 test updated on purpose:** the Offer card now has four `hx-target`
+     attributes (Reject and Withdraw links added), not two.
+3. **Refactor:** the archived-candidate check became a named lazy queryset instead of a wrapped
+   expression.
+
+**Browser check of the real HTMX swap:**
+- **Setup:** the same approach as Phase 5. A throwaway dev server ran from settings in the
+  scratchpad against a scratch SQLite file (with `X_FRAME_OPTIONS = "SAMEORIGIN"` for the
+  harness only). The Tailwind CSS was rebuilt for the new classes (gitignored output). The
+  project's settings and `db.sqlite3` were untouched, and the scratch database was deleted.
+- **Harness:** headless Chrome clicked the real controls and recorded the card after each
+  `htmx:afterSettle`:
+  - **Reject:** opened the form in place (one sidebar, URL unchanged), with focus in the
+    reason field.
+  - **Cancel:** restored the card.
+  - **Empty note:** the browser's `required` check stopped it, so no POST was sent.
+  - **Spaces-only note:** the server refused it, and the form stayed open with `aria-invalid`.
+  - **Confirm with a reason:** moved Interview → Rejected, and the history refreshed (3 → 4
+    rows) with the note.
+  - **Reactivate:** the form said "Returns to Interview."
+  - **Double-clicked Confirm:** sent one POST and returned to Interview (5 rows).
+- A screenshot of a refused blank Withdraw showed the red alert, the open form with the red
+  `aria-invalid` border, and the cursor in the field.
+
+**Verification:**
+- **355 of 355 tests pass:** 311 from Phases 1–5 and 44 new.
+- `ruff check` and `ruff format --check` are clean (93 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` and `migrate --check` are clean. Phase 6 needed no
+  migration.
+- **Covered:** user stories 38, 39, 41 and 42 (and 40, reactivation on a closed job); AC21 (now
+  complete), AC23, AC24, AC25 and AC26, plus AC22, AC27–AC29 and AC2 for the new actions.
+- **Not started, as planned:** Close and Reopen (Phase 7); Archive and Restore (Phase 8). The
+  archived-candidate guard is tested by setting `archived_at` directly.
+
+**Decisions to review:**
+- **Note links reuse the detail URL** (`?confirm=<action>`, partial on `HX-Request`) instead of
+  adding a new GET route. This keeps the plan's URL list unchanged and gives a no-JavaScript
+  fallback.
+- **A missing note keeps the form open,** while other refusals close it, because only a missing
+  note is fixed by typing.
+- **Archived candidates can still be rejected or withdrawn.** The PRD guards only Reactivate.
+- **Known gap:** after Cancel, keyboard focus returns to the page body, not the button that
+  opened the form.
+
+---
+
+## Entry 17
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 6 approval, Cancel focus fix, final review, commit and push
+
+**Prompt:**
+```
+I approve Phase 6 and all three implementation decisions. Before committing, please make one
+small accessibility improvement: when a user opens a Reject, Withdraw, or Reactivate reason form
+and selects Cancel, restore keyboard focus to the action that originally opened the form. Ensure
+this works with HTMX and does not break the no-JavaScript fallback. Follow Red-Green-Refactor for
+this change and add an appropriate regression test. Keep the fix small and within Phase 6 scope.
+Then: review all Phase 6 changes for leftover stubs, duplicate code, accidental changes, and
+formatting issues; confirm that required reasons, reactivation history, Hired permanence, and
+archived-candidate guards remain correct; confirm every successful transition creates exactly
+one immutable StageChange and refused transitions create none; confirm no credentials, local
+databases, generated CSS, or build artifacts are included; run the complete test suite, Ruff lint
+and format checks, Django system checks, and migration checks; update PROMPTS.md with my
+approval, the accessibility improvement, and final verification results; commit with the
+message "Phase 6: reject withdraw and reactivate applications"; push to the existing GitHub main
+branch; report the final test count, commit hash, push status, and remaining issues. Do not
+begin Phase 7 yet.
+```
+
+**Approved decisions:**
+1. Note links reuse the detail URL (`?confirm=<action>`, card-only on `HX-Request`) rather than a
+   new route.
+2. Only a missing-note refusal keeps the form open; other refusals close it.
+3. Archived candidates can still be rejected or withdrawn; only Reactivate is guarded.
+
+**Accessibility improvement: Cancel returns focus to the opening link**
+- **Red:** three new regression tests in `NoteFormTests`:
+  - after Cancel, the Reject and Withdraw links carry `autofocus`, with and without HTMX;
+  - Reactivate gets the same;
+  - `?focus=` is ignored for actions with no link (`advance`, `back`, an unavailable
+    `reactivate`, unknown and empty values).
+
+  Two existing assertions changed from "Cancel links to the bare detail URL" to "Cancel links to
+  `?focus=<action>`". The run showed 7 failures for that reason.
+- **Green:**
+  - Cancel's `href` and `hx-get` are now `/applications/<pk>/?focus=<action>`.
+  - `stage_card_context` accepts `focus` and keeps it only when that action is one of the card's
+    note links. The link then renders with `autofocus`.
+  - HTMX focuses `[autofocus]` in swapped content. Without JavaScript the same `href` loads the
+    full page with the form closed and the link marked `autofocus`.
+  - No new URL, view or JavaScript.
+- **Refactor:** `stage_card_context` looks up `confirming` and `focus` from one dict of
+  note-requiring moves.
+- **Browser check** (throwaway scratch server and database, deleted afterwards):
+  - in headless Chrome, opening Reject or Withdraw put focus in the reason field;
+  - after Cancel, focus was on the Reject or Withdraw link again, and the URL was unchanged.
+  - The full-page fallback rendered the form closed with `autofocus` on Withdraw, but headless
+    Chrome didn't move focus into the harness iframe on a full load. That focus step was
+    therefore checked through the markup, not observed in the browser.
+
+**Final review:**
+- **No leftovers:** no stubs, TODOs or debug output, and no duplicate code. Changes are limited
+  to `pipeline/` (service, views, stage card, two test files), `CLAUDE.md` and `PROMPTS.md`.
+  Ruff reformatted one test file.
+- **Rules still covered by passing tests:**
+  - **Required reasons:** empty, spaces-only and newline/tab notes refused for Reject, Withdraw
+    and Reactivate.
+  - **Reactivation history:** returns to the latest exit's `from_stage`, across repeated cycles;
+    refused if the history doesn't end in an exit.
+  - **Hired permanence:** every action refused, with or without a note.
+  - **Archived candidate:** blocks Reactivate, after the note check; a closed job doesn't block
+    it and stays Closed.
+
+  The service was not changed by the focus fix.
+- **One StageChange per move, none on refusal:** the StageChange is written only after the
+  conditional UPDATE changed exactly one row, inside the same transaction. Every refusal is
+  raised before it. Tests check the count for each allowed move, each refusal, stale and
+  double-clicked requests, and the race. The append-only model, queryset and SQLite trigger keep
+  the entries immutable.
+- **Nothing sensitive or generated:** `db.sqlite3`, `assets/css/tailwind.css`, `.env`, `.venv` and
+  `.django_tailwind_cli` are gitignored and none is in the change set. A scan of the diff found no
+  credentials.
+
+**Final verification:**
+- **358 of 358 tests pass:** 311 from Phases 1–5 and 47 from Phase 6.
+- `ruff check` and `ruff format --check` are clean (93 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Result:** committed as "Phase 6: reject withdraw and reactivate applications" and pushed to
+`main`. Phase 7 not started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

@@ -2,8 +2,8 @@
   <div class="card-body">
     <h2 id="stage-heading" class="card-title">Stage</h2>
     {% if feedback %}
-    {# Focused after an HTMX swap (htmx honours autofocus), so the result is announced. #}
-    <div class="alert {% if feedback.ok %}alert-success{% else %}alert-error{% endif %}" role="{% if feedback.ok %}status{% else %}alert{% endif %}" tabindex="-1" autofocus>{{ feedback.text }}</div>
+    {# Focused after an HTMX swap (htmx honours autofocus), so the result is announced; an open note form takes focus instead. #}
+    <div id="stage-feedback" class="alert {% if feedback.ok %}alert-success{% else %}alert-error{% endif %}" role="{% if feedback.ok %}status{% else %}alert{% endif %}" tabindex="-1"{% if not confirming %} autofocus{% endif %}>{{ feedback.text }}</div>
     {% endif %}
     <p class="flex flex-wrap items-center gap-2">
       {% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %}
@@ -12,17 +12,44 @@
     {% if application.stage == "hired" %}<p class="text-sm">Hired is permanent.</p>{% endif %}
     {% if moves and perms.pipeline.change_application %}
     {% url 'pipeline:application_transition' application.pk as transition_url %}
+    {% with detail_url=application.get_absolute_url %}
+    {% if confirming %}
+    {# Inline note form for Reject, Withdraw or Reactivate; Confirm posts to the same endpoint as the buttons. #}
+    <form method="post" action="{{ transition_url }}" hx-post="{{ transition_url }}" hx-target="#stage-card" hx-swap="outerHTML" hx-disabled-elt="find button" class="flex flex-col gap-3">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="{{ confirming.action.value }}">
+      <input type="hidden" name="expected_stage" value="{{ application.stage }}">
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">{{ confirming.action.label }} this application</legend>
+        {% if confirming.action == "reactivate" %}<p class="text-sm">Returns to {{ confirming.target.label }}.</p>{% endif %}
+        <label for="id_stage_note" class="label text-base-content">Reason <span class="text-error" aria-hidden="true">*</span></label>
+        <textarea name="note" id="id_stage_note" class="textarea w-full" rows="3" required autofocus{% if feedback and not feedback.ok %} aria-invalid="true" aria-describedby="stage-feedback"{% endif %}></textarea>
+      </fieldset>
+      <div class="flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-sm {% if confirming.action == 'reject' %}btn-error{% else %}btn-primary{% endif %}">Confirm</button>
+        {# Cancel puts focus back on the link that opened this form. #}
+        <a href="{{ detail_url }}?focus={{ confirming.action.value }}" hx-get="{{ detail_url }}?focus={{ confirming.action.value }}" hx-target="#stage-card" hx-swap="outerHTML" class="btn btn-sm btn-ghost">Cancel</a>
+      </div>
+    </form>
+    {% else %}
     <div class="flex flex-wrap gap-2">
       {% for move in moves %}
+      {% if move.needs_note %}
+      {# Opens the inline note form; the move itself happens only on Confirm. #}
+      <a href="{{ detail_url }}?confirm={{ move.action.value }}" hx-get="{{ detail_url }}?confirm={{ move.action.value }}" hx-target="#stage-card" hx-swap="outerHTML" class="btn btn-sm{% if move.action == 'reject' %} btn-error btn-outline{% elif move.action == 'reactivate' %} btn-primary{% else %} btn-outline{% endif %}"{% if move.action == focus %} autofocus{% endif %}>{{ move.label }}</a>
+      {% else %}
       {# Each form carries the stage this card shows; the server refuses it if that's out of date. #}
       <form method="post" action="{{ transition_url }}" hx-post="{{ transition_url }}" hx-target="#stage-card" hx-swap="outerHTML" hx-disabled-elt="find button">
         {% csrf_token %}
         <input type="hidden" name="action" value="{{ move.action.value }}">
         <input type="hidden" name="expected_stage" value="{{ application.stage }}">
-        <button type="submit" class="btn btn-sm{% if move.action == 'advance' %} btn-primary{% endif %}">{{ move.action.label }} to {{ move.target.label }}</button>
+        <button type="submit" class="btn btn-sm{% if move.action == 'advance' %} btn-primary{% endif %}">{{ move.label }}</button>
       </form>
+      {% endif %}
       {% endfor %}
     </div>
+    {% endif %}
+    {% endwith %}
     {% endif %}
   </div>
 </section>
