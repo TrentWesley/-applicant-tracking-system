@@ -1,11 +1,13 @@
+from unittest import mock
+
 from django.test import TestCase
 from django.urls import reverse
 
 from core.tests.utils import make_admin, make_recruiter
 from jobs.models import JobOpening, JobStatus
 from jobs.services import JobStatusUnchanged, close_job, reopen_job
-from jobs.tests.test_job_views import detail_url, make_viewer
-from jobs.tests.utils import make_job
+from jobs.tests.test_job_views import VALID, detail_url, edit_url, make_viewer
+from jobs.tests.utils import make_job, make_skill
 from pipeline.models import Application, Stage, StageChange
 from pipeline.tests.utils import make_application
 
@@ -206,3 +208,41 @@ class JobDetailStatusTests(TestCase):
         for job in (open_job, finished):
             with self.subTest(job=job.title):
                 self.assertNotContains(self.client.get(detail_url(job)), "still has")
+
+
+class EditDoesNotOverwriteStatusTests(TestCase):
+    """
+    Regression: the edit form saved every column from the job it had loaded, so a Close or
+    Reopen committed between that load and the save was silently undone.
+    """
+
+    def setUp(self):
+        self.client.force_login(make_recruiter())
+        self.python = make_skill("Python")
+        self.job = make_job()
+
+    def edit_with_job_loaded_before(self, change):
+        stale = JobOpening.objects.get(pk=self.job.pk)  # the edit request's copy
+        change(JobOpening.objects.get(pk=self.job.pk))  # another request commits now
+        data = VALID | {"title": "Senior Data Analyst", "skills": [self.python.pk]}
+        with mock.patch("jobs.views.JobUpdateView.get_object", return_value=stale):
+            response = self.client.post(edit_url(self.job), data)
+        self.assertEqual(response.status_code, 302)
+        job = JobOpening.objects.get()
+        self.assertEqual(job.title, "Senior Data Analyst")  # the edit itself is saved
+        self.assertEqual(list(job.skills.all()), [self.python])
+        return job
+
+    def test_a_close_during_an_edit_stays_closed(self):
+        job = self.edit_with_job_loaded_before(close_job)
+        self.assertEqual(job.status, JobStatus.CLOSED)
+
+    def test_a_reopen_during_an_edit_stays_open(self):
+        close_job(self.job)
+        job = self.edit_with_job_loaded_before(reopen_job)
+        self.assertEqual(job.status, JobStatus.OPEN)
+
+    def test_the_edit_still_bumps_updated_at(self):
+        before = JobOpening.objects.get().updated_at
+        self.client.post(edit_url(self.job), VALID | {"title": "Analyst II"})
+        self.assertGreater(JobOpening.objects.get().updated_at, before)

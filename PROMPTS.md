@@ -2039,6 +2039,82 @@ not started.
 
 ---
 
+## Entry 22
+
+**Date:** 2026-10-28
+
+**Phase:** Regression fix between Phases 8 and 9 (stale job edit undoing Close or Reopen)
+
+**Prompt:**
+```
+I approve fixing the Job Edit form's stale-update bug before beginning Phase 9. Please make this a
+narrowly scoped regression fix: write failing regression tests demonstrating that editing a job
+with a stale form cannot undo a concurrent Close or Reopen action; update the Job Edit form so it
+saves only its editable fields and updated_at, without overwriting the job's status; preserve all
+existing job creation, editing, Close/Reopen, and application behavior; follow
+Red-Green-Refactor; run the complete test suite, Ruff lint and format checks, Django system
+checks, and migration checks; update PROMPTS.md with my approval, the regression tests, the fix,
+and verification results; check whether Phase 8 has already been committed and pushed. If it has,
+make a separate commit for this regression fix. If it has not, commit the verified Phase 8 work
+and this fix, documenting both clearly. Push the resulting commits to the existing GitHub main
+branch. Report the final test count, commit hashes, push status, and any remaining issues. Do not
+begin Phase 9 yet.
+```
+
+**Approval:** I approved fixing the stale-update bug in the job edit form, reported as a
+remaining issue in Entry 21, as a narrowly scoped fix before Phase 9.
+
+**Phase 8 status:** already committed (`d7db912`) and pushed, so this fix is a separate commit.
+
+**The bug:** `JobUpdateView` loads the job, then `JobOpeningForm` saved it with a plain `save()`,
+which writes every column from that loaded copy, including `status`. The load and the save aren't
+one transaction. So a Close or Reopen committed by another request in between was silently
+undone: the job went back to the status the edit had loaded. No trigger guards job status, so
+there was no error.
+
+**Red:** `EditDoesNotOverwriteStatusTests` in `jobs/tests/test_close_reopen.py` (3 tests):
+- **Close during an edit:** load the edit's copy of an open job, commit a real `close_job`, then
+  post the edit (new title and a skill). The job must stay Closed, and the edit itself must be
+  saved.
+- **Reopen during an edit:** the same for a closed job and a real `reopen_job`.
+- **`updated_at`:** an edit must still bump it. This passed before the fix and guards it through
+  the change.
+
+The first two failed for the right reason: `'open' != JobStatus.CLOSED` and `'closed' !=
+JobStatus.OPEN`.
+
+**Green and Refactor:**
+- **New shared mixin:** the Phase 8 `CandidateForm.save()` override became
+  `core.forms.SaveOnlyFormFieldsMixin`, used by both `CandidateForm` and `JobOpeningForm`.
+  - New rows still save normally.
+  - An existing row is saved with `update_fields`: the form's concrete columns plus
+    `updated_at`.
+  - The many-to-many `skills` field isn't a column (`update_fields` would reject it), so it's
+    left out of the list and still saved by `save_m2m()`.
+- **Docs:** the `JobOpeningForm` docstring now says an edit never writes back a stale status.
+  CLAUDE.md's rule on edit forms now names the mixin and both forms.
+
+**Behaviour kept:** every earlier test passes, including:
+- job create (new jobs are Open) and edit, with skills and validation;
+- a posted `status` being ignored on create and edit (AC11);
+- Close and Reopen, with stale and repeated requests;
+- applications on closed jobs;
+- the Phase 8 candidate edit regression tests, now running through the shared mixin.
+
+**Verification:**
+- **434 of 434 tests pass:** 431 before, plus 3 new.
+- `ruff check` and `ruff format --check` are clean (102 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean. No migration
+  was needed.
+- **Files:** only `core/forms.py`, `candidates/forms.py`, `jobs/forms.py`,
+  `jobs/tests/test_close_reopen.py`, `CLAUDE.md` and `PROMPTS.md` changed.
+
+**Result:** committed separately as "Fix stale job edit undoing Close or Reopen" and pushed to
+`main`. Phase 9 not started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

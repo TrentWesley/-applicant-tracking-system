@@ -116,10 +116,11 @@ uv run python manage.py check
     (via `concurrency_worker.py`) to prove it.
   - Don't set `archived_at` directly in tests on a candidate with an active application: the
     trigger refuses it.
-- **Edit forms save only their own fields** (`CandidateForm.save` uses `update_fields`): a full
-  `save()` writes back every column from the copy the request loaded, undoing an Archive,
-  Restore, Close or stage move committed in between. Follow this for any new edit form, such as
-  application notes. (The Phase 3 job edit form doesn't yet; see PROMPTS.md Entry 21.)
+- **Edit forms save only their own fields:** ModelForms mix in `core.forms.SaveOnlyFormFieldsMixin`
+  (`CandidateForm`, `JobOpeningForm`), which saves an existing row with `update_fields` (the
+  form's columns plus `updated_at`). A full `save()` writes back every column from the copy the
+  request loaded, undoing an Archive, Restore, Close, Reopen or stage move committed in between.
+  Use it for any new edit form, such as application notes.
 - **Job status:** changes only through `jobs/services.py` (`close_job`, `reopen_job`): a
   conditional `UPDATE … WHERE status = <from>`, so a repeated or stale request raises
   `JobStatusUnchanged` ("already closed/open") and changes nothing. They never touch

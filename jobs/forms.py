@@ -1,6 +1,6 @@
 from django import forms
 
-from core.forms import CheckboxSelectMultiple, DaisyUIFormMixin
+from core.forms import CheckboxSelectMultiple, DaisyUIFormMixin, SaveOnlyFormFieldsMixin
 from jobs.models import DUPLICATE_SKILL_MESSAGE, JobOpening, Skill
 
 
@@ -18,8 +18,11 @@ class SkillForm(DaisyUIFormMixin, forms.ModelForm):
         return name
 
 
-class JobOpeningForm(DaisyUIFormMixin, forms.ModelForm):
-    """Status is deliberately absent: it changes only through Close and Reopen."""
+class JobOpeningForm(SaveOnlyFormFieldsMixin, DaisyUIFormMixin, forms.ModelForm):
+    """
+    Status is deliberately absent: it changes only through Close and Reopen, and an edit saves
+    only these fields, so it never writes back a stale status.
+    """
 
     class Meta:
         model = JobOpening
