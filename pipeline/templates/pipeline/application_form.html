@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}New application{% endblock %}
+
+{% block content %}
+<div>
+  {% if from_candidate %}
+  <a href="{{ from_candidate.get_absolute_url }}" class="link link-hover text-sm">← {{ from_candidate }}</a>
+  {% else %}
+  <a href="{% url 'pipeline:application_list' %}" class="link link-hover text-sm">← Applications</a>
+  {% endif %}
+  <h1 class="text-2xl font-bold">New application</h1>
+  <p class="text-sm">Every new application starts at Applied. Only open jobs and active candidates are listed.</p>
+  <p class="text-sm text-base-content/70">Fields marked <span class="text-error">*</span> are required.</p>
+</div>
+
+<section class="card max-w-3xl bg-base-100 shadow-sm">
+  <form method="post" class="card-body" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="alert alert-error" role="alert">
+      {% for error in form.non_field_errors %}<span>{{ error }}</span>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {% include "core/_field.html" with field=form.candidate %}
+      {% include "core/_field.html" with field=form.job_opening %}
+      <div class="sm:col-span-2">{% include "core/_field.html" with field=form.notes %}</div>
+    </div>
+
+    <div class="card-actions mt-2">
+      <button type="submit" class="btn btn-primary">Create application</button>
+      <a href="{% if from_candidate %}{{ from_candidate.get_absolute_url }}{% else %}{% url 'pipeline:application_list' %}{% endif %}" class="btn btn-ghost">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

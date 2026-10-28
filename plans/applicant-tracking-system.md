@@ -571,6 +571,11 @@ Reactivate.
   page shows the Restore action and no New Application button.
 - Confirm that the creation guard (Phase 4) and the Reactivate guard (Phase 6) both use the
   candidate's archived state.
+- **Required follow-up from Phase 4 review:** close the race between creating an application and
+  archiving the same candidate. The archive check (no active applications) and the write of
+  `archived_at` must happen in one transaction that can't interleave with `create_application`
+  for that candidate (for example a conditional `UPDATE … WHERE archived_at IS NULL AND NOT EXISTS
+  (active application)`, or an equivalent lock), with a regression test.
 
 ### Tests to write first
 

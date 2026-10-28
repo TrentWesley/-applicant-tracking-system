@@ -48,7 +48,12 @@ uv run python manage.py check
 - `jobs`: JobOpening and Skill (`/jobs/`, `/jobs/new/`, `/jobs/<pk>/`, `/jobs/<pk>/edit/`,
   `/jobs/?skill=<pk>`; Admin-only `/skills/`, `/skills/new/`, `/skills/<pk>/edit/`,
   `/skills/<pk>/delete/`); test helpers `jobs.tests.utils.make_skill` and `make_job`.
-- `pipeline`: Application, StageChange and the single **stage-change service**.
+- `pipeline`: Application, StageChange and the single **stage-change service**
+  (`pipeline/services.py`; `create_application` so far). Pages: `/applications/` (`?stage=<value>`,
+  lowercase stored values such as `final_review`), `/applications/new/` (`?candidate=<pk>`
+  preselects an active candidate), `/applications/<pk>/`. Test helper
+  `pipeline.tests.utils.make_application` (creates through the service; a `stage=` argument is set
+  directly until Phases 5–6 add moves).
 - `staff`: staff management over Django's built-in `User` (no custom user model).
 
 ## Conventions
@@ -80,8 +85,8 @@ uv run python manage.py check
   from the `aria-invalid` rule in `tailwind/source.css` (it lives in `@layer utilities`, because
   DaisyUI 5's own rules sit in sublayers there). Checkbox lists use `core.forms.CheckboxSelectMultiple`;
   `_field.html` renders them in a `<fieldset>` with a `<legend>`.
-- **Views:** generic CBVs with `PermissionRequiredMixin` and `raise_exception = True` (403 for
-  signed-in users without the permission). Templates hide controls with `perms.<app>.<codename>`.
+- **Views:** generic CBVs with `core.views.StaffPermissionMixin` (Django's `PermissionRequiredMixin`
+  with `raise_exception = True`: 403 for signed-in users without the permission). Templates hide controls with `perms.<app>.<codename>`.
 - **Case-insensitive uniqueness:** a `UniqueConstraint(Lower(field))` in the model, plus a form
   `clean_<field>` that checks `__iexact` (excluding the instance being edited) so the message sits
   on the field.
@@ -91,6 +96,13 @@ uv run python manage.py check
   check catches an assignment committed by another request during the delete.
 - **HTMX:** the CSRF token is sent on every HTMX request through `hx-headers` on `<body>`. Stage
   actions and notes edits return partials when `HX-Request` is set.
+- **Stage badges:** `core/_stage_badge.html` with `stage=` and `label=` (e.g.
+  `label=application.get_stage_display`); one style each for early active stages, Offer, Hired, and
+  Rejected/Withdrawn.
+- **StageChange is append-only:** the model refuses `save()` on an existing row and `delete()`,
+  the queryset refuses `update()`, `bulk_update()` and `delete()`, and a SQLite trigger (`pipeline/0002`) refuses any
+  `UPDATE`. Rows go only through the cascade when their Application is deleted. Service refusals
+  raise `StageChangeRefused` with the user-facing message.
 - **Stage changes:** only through the stage-change service, with the check order: stale expected
   stage → action allowed → required note → guards; conditional `UPDATE … WHERE stage = expected`
   inside `transaction.atomic()`, one StageChange per updated row.

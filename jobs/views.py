@@ -1,5 +1,4 @@
 from django.contrib import messages
-from django.contrib.auth.mixins import PermissionRequiredMixin
 from django.contrib.messages.views import SuccessMessageMixin
 from django.db import IntegrityError, transaction
 from django.db.models import Count, ProtectedError
@@ -7,17 +6,12 @@ from django.http import HttpResponseRedirect
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
+from core.views import StaffPermissionMixin
 from jobs.forms import JobFilterForm, JobOpeningForm, SkillForm
 from jobs.models import JobOpening, Skill
 
 
-class JobsPermissionMixin(PermissionRequiredMixin):
-    # Login is enforced by LoginRequiredMiddleware; a signed-in user without the permission
-    # gets 403 instead of a login redirect.
-    raise_exception = True
-
-
-class JobListView(JobsPermissionMixin, ListView):
+class JobListView(StaffPermissionMixin, ListView):
     permission_required = "jobs.view_jobopening"
     context_object_name = "jobs"
     template_name = "jobs/job_list.html"
@@ -37,14 +31,14 @@ class JobListView(JobsPermissionMixin, ListView):
         return super().get_context_data(filter_form=self.filter_form, skill=self.skill, **kwargs)
 
 
-class JobDetailView(JobsPermissionMixin, DetailView):
+class JobDetailView(StaffPermissionMixin, DetailView):
     permission_required = "jobs.view_jobopening"
     queryset = JobOpening.objects.prefetch_related("skills")
     context_object_name = "job"
     template_name = "jobs/job_detail.html"
 
 
-class JobCreateView(JobsPermissionMixin, SuccessMessageMixin, CreateView):
+class JobCreateView(StaffPermissionMixin, SuccessMessageMixin, CreateView):
     permission_required = "jobs.add_jobopening"
     model = JobOpening
     form_class = JobOpeningForm
@@ -52,7 +46,7 @@ class JobCreateView(JobsPermissionMixin, SuccessMessageMixin, CreateView):
     success_message = "Job opening %(title)s added."
 
 
-class JobUpdateView(JobsPermissionMixin, SuccessMessageMixin, UpdateView):
+class JobUpdateView(StaffPermissionMixin, SuccessMessageMixin, UpdateView):
     permission_required = "jobs.change_jobopening"
     model = JobOpening
     form_class = JobOpeningForm
@@ -60,7 +54,7 @@ class JobUpdateView(JobsPermissionMixin, SuccessMessageMixin, UpdateView):
     success_message = "Job opening %(title)s: changes saved."
 
 
-class SkillListView(JobsPermissionMixin, ListView):
+class SkillListView(StaffPermissionMixin, ListView):
     # Recruiters may view skills (they appear on jobs), but this management page is Admin-only.
     permission_required = ("jobs.view_skill", "jobs.change_skill")
     # Meta.ordering is dropped from GROUP BY queries, so order explicitly.
@@ -69,7 +63,7 @@ class SkillListView(JobsPermissionMixin, ListView):
     template_name = "jobs/skill_list.html"
 
 
-class SkillCreateView(JobsPermissionMixin, SuccessMessageMixin, CreateView):
+class SkillCreateView(StaffPermissionMixin, SuccessMessageMixin, CreateView):
     permission_required = "jobs.add_skill"
     model = Skill
     form_class = SkillForm
@@ -78,7 +72,7 @@ class SkillCreateView(JobsPermissionMixin, SuccessMessageMixin, CreateView):
     success_message = "Skill %(name)s added."
 
 
-class SkillUpdateView(JobsPermissionMixin, SuccessMessageMixin, UpdateView):
+class SkillUpdateView(StaffPermissionMixin, SuccessMessageMixin, UpdateView):
     permission_required = "jobs.change_skill"
     model = Skill
     form_class = SkillForm
@@ -87,7 +81,7 @@ class SkillUpdateView(JobsPermissionMixin, SuccessMessageMixin, UpdateView):
     success_message = "Skill renamed to %(name)s."
 
 
-class SkillDeleteView(JobsPermissionMixin, DeleteView):
+class SkillDeleteView(StaffPermissionMixin, DeleteView):
     permission_required = "jobs.delete_skill"
     model = Skill
     context_object_name = "skill"

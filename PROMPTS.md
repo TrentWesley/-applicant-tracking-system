@@ -877,6 +877,205 @@ any code was written.
 
 ---
 
+## Entry 13
+
+**Date:** 2026-10-27
+
+**Phase:** Phase 4 implementation (Applications: creation, list, detail and history)
+
+**Prompt:**
+```
+/implement Implement Phase 4 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Follow the exact Phase 4 scope: Application model connecting a Candidate to
+a JobOpening; enforce uniqueness for each candidate/job combination; new applications begin at the
+Applied stage; create an initial StageChange record (null → Applied) when an application is
+created; make StageChange history append-only and immutable; ensure application creation and its
+initial history record happen atomically; prevent new applications for archived candidates or
+closed jobs; application creation, listing, and detail pages; display the application stage and
+history on the detail page; provide a New Application button on the Applications list and
+Candidate detail page, with the candidate preselected when applicable; enforce Recruiter and Admin
+permissions server-side; use DaisyUI templates consistent with the existing application.
+Requirements: strict TDD (Red-Green-Refactor); write failing tests before implementing each
+feature; follow the Phase 4 user stories and acceptance criteria; preserve Phases 1–3; do not
+implement stage transitions, rejection, withdrawal, reactivation, or application notes editing
+yet; run the complete test suite, Ruff lint and format checks, Django system checks, and migration
+checks; update PROMPTS.md; stop after Phase 4 for my review before committing or pushing. Do not
+begin Phase 5.
+```
+
+**Result:**
+Claude Code built Phase 4 in five Red-Green cycles. Each cycle's tests were run and seen to fail
+for the expected reason before any code was written.
+
+1. **Models and immutable history** (`pipeline/tests/test_models.py`, 17 tests).
+   - **Red:** `pipeline.models` didn't exist.
+   - **Green, `Stage`:** TextChoices with the eight stages in pipeline order. `ACTIVE_STAGES` and
+     `TERMINAL_STAGES` tuples, and a `Stage.is_active` property.
+   - **Green, `Application`:**
+     - candidate, job opening and `created_by` FKs, all PROTECT;
+     - `stage` (default Applied), `stage_changed_at` and `created_by` are not editable, so no
+       form can set them;
+     - `created_at` and optional `notes`;
+     - a unique (candidate, job_opening) constraint with the message "This candidate already has
+       an application for this job.";
+     - ordered most recently changed first.
+   - **Green, `StageChange`:**
+     - application FK CASCADE, `changed_by` FK PROTECT;
+     - `from_stage` is null for the creation entry, as the plan specifies, with a `noqa` for
+       Ruff's DJ001 rule on nullable CharFields;
+     - `to_stage`, `changed_at` and `note`, ordered by `changed_at`, then id;
+     - no model permissions (`default_permissions = ()`).
+   - **Append-only, at two levels:**
+     - **Model and queryset:** `save()` on an existing row, `delete()`, and queryset `update()`
+       and `delete()` all raise `HistoryIsImmutable`.
+     - **Database:** a SQLite `BEFORE UPDATE` trigger (migration `0002_stagechange_append_only`)
+       refuses raw-SQL updates.
+     - Deleting an Application still removes its history, because Django's cascade deletes rows
+       directly. Phase 10's never-moved delete needs that, and a test covers it.
+2. **Group permissions** (`test_permissions.py`, 4 tests).
+   - **Red:** no `pipeline` permissions.
+   - **Green:** migration `0003_application_group_permissions` grants view, add and change on
+     Application to both groups, and delete to Admin.
+   - A test confirms StageChange has no permissions to grant.
+   - The pipeline migrations, including the trigger, reverse cleanly.
+3. **Stage-change service, creation path** (`test_services.py`, 10 tests).
+   - **Red:** `pipeline.services` didn't exist.
+   - **Green:** `create_application`, inside one `transaction.atomic()`:
+     - re-reads the job and candidate, so stale objects passed in can't slip past a guard;
+     - checks the job is Open, the candidate isn't archived, and the pair isn't a duplicate;
+     - creates the application at Applied, with a matching null → Applied StageChange
+       (`changed_by` = the creator, same timestamp).
+   - Refusals raise `StageChangeRefused` with a clear message.
+   - **Race:** if two requests for the same pair both pass the check, the unique constraint fails
+     the second insert. The service re-checks and turns it into the same duplicate refusal.
+   - **Tests:**
+     - atomicity: when the StageChange write fails, no application is left behind;
+     - a stale job object, where the database already says Closed;
+     - the duplicate race, with the pre-check missing the row and the re-check finding it.
+4. **Creation form** (`test_forms.py`, 9 tests).
+   - **Red:** `pipeline.forms` didn't exist.
+   - **Green:** `ApplicationForm` has candidate, job opening and notes only.
+     - It offers only Open jobs and non-archived candidates, labelled "Ann Lee (email)" and
+       "Title (Department)".
+     - A posted closed job or archived candidate gets a clear reason instead of Django's "Select a
+       valid choice".
+     - A duplicate pair shows the constraint's message as a form error.
+5. **Views, entry points and badges** (`test_views.py` 30, `test_entry_points.py` 5,
+   `core/tests/test_badges.py` 3).
+   - **Red:** the URL names and the badge template didn't exist.
+   - **Green:**
+     - **List** at `/applications/`: stage filter links (All plus all eight stages, the current
+       one marked with `aria-current`). `?stage=<value>` covers open and closed jobs; unknown
+       values are ignored.
+     - **Create** at `/applications/new/`:
+       - `?candidate=<pk>` preselects an active candidate and can be changed;
+       - an archived or unknown candidate is never preselected;
+       - saving goes through the service, and a refusal from it appears as a form alert;
+       - success redirects to the detail page.
+     - **Detail** at `/applications/<pk>/`: stage badge, candidate and job links (with the job's
+       status badge), creator, notes, and a read-only history table (when, from, to, by, note),
+       oldest first.
+       - The creation entry shows "New application" as its from-stage.
+       - POST returns 405, and there are no stage actions.
+     - **Candidate detail page:** a new Applications section with stage badges, and a New
+       application button linking to `/applications/new/?candidate=<pk>`.
+       - The button shows only for non-archived candidates and users with `add_application`.
+       - An archived candidate's page says why there's no button.
+     - **Stage badge:** `core/_stage_badge.html`, with one style each for early active stages
+       (info), Offer (warning), Hired (success) and Rejected/Withdrawn (ghost).
+     - The Applications nav link stays highlighted on every application page
+       (`section="pipeline:"`).
+   - **Test mistakes found on the first green run, and fixed:**
+     - the helper's default creator clashed with an existing `recruiter` user;
+     - a check didn't allow for Django marking the empty `---------` option `selected`;
+     - a URL-name check read the root resolver, where namespaced names don't appear.
+
+**Visual check:**
+- Headless-Edge screenshots of the list, the detail page with history, the form showing a
+  duplicate refusal, and a candidate page with applications. Sample data was created inside a
+  rolled-back transaction.
+- All seven rendered pages, including the filtered list and an archived candidate, were measured
+  in a 375 px iframe. None scrolls sideways.
+
+**Verification:**
+- `ruff check` and `ruff format --check` are clean (Ruff flagged one unused import, a nested
+  `with` and a long docstring in the new tests; all fixed). `manage.py check` reports no issues;
+  `makemigrations --check` and `migrate --check` are clean.
+- **Encoding slip, caught by `ruff format --check`:**
+  - A helper script edited CLAUDE.md with Python's default Windows encoding (cp1252). Existing
+    text round-tripped unchanged, but the newly added en dash ("Phases 5–6") was written as a
+    cp1252 byte.
+  - The byte was repaired, and every tracked and new text file was scanned: all are valid UTF-8.
+  - Later scripted edits should open files with `encoding="utf-8"`.
+- **267 of 267 tests pass:** 189 from Phases 1–3 and 78 from Phase 4.
+- **Covered:** user stories 32, 33, 34, 35, 45 and 46; AC19, AC20, AC30, AC32 and AC33; and AC2
+  for application creation.
+- **Not started, as planned:**
+  - Advance and Back over HTMX (Phase 5);
+  - Reject, Withdraw and Reactivate (Phase 6);
+  - Job Closed badges on applications (Phase 7);
+  - notes editing (later phase);
+  - Admin application delete (Phase 10).
+
+**Decisions to review:**
+- **Lowercase stage values in URLs** (`?stage=applied`, `?stage=final_review`), matching every
+  other choice field. The plan's `?stage=Applied` is the label.
+- **Application `created_at` and `stage_changed_at`** come from the service, so they can differ
+  by microseconds. The creation StageChange uses exactly `stage_changed_at`.
+- **Archive race, for Phase 8:** creating an application while another request archives the same
+  candidate isn't guarded yet. Phase 8's archive check should run inside a transaction and
+  re-check.
+
+**Feedback and decisions:**
+- I approved Phase 4.
+- **I approved lowercase stage values in URLs** (`?stage=applied`, `?stage=final_review`). They
+  match the stored values and every other choice field.
+- **Concurrency follow-up, required in Phase 8:**
+  - A new application can still be created for a candidate who is being archived at that
+    moment. I agreed to leave this documented for now, but it must be fixed when archiving is
+    built.
+  - It's recorded as a required task under Phase 8 in `plans/applicant-tracking-system.md`. The
+    archive check and the write of `archived_at` must not interleave with `create_application`,
+    with a regression test.
+
+**Final review before committing:**
+- **Duplicate code removed:** the three-line permission mixin now had three copies
+  (`CandidatePermissionMixin`, `JobsPermissionMixin`, `ApplicationPermissionMixin`).
+  - They became one `core.views.StaffPermissionMixin`. This touched the approved Phase 2 and 3
+    views.
+  - It's a pure refactor: the existing 403 and login-redirect tests in every app passed
+    unchanged.
+- **Redundant query removed:** `preselected_candidate` is a `cached_property`, so its query runs
+  once per request instead of twice.
+- **Immutability confirmed, and one gap closed:**
+  - **Already covered by tests:** `save()` on an existing row, `delete()`, queryset `update()`
+    and `delete()`, and raw-SQL `UPDATE` (the trigger).
+  - **New test: an existing pk.** A new instance reusing an existing pk makes Django try an
+    `UPDATE`, which only the trigger stops. The test confirms it does.
+  - **New test, which went red first:** `bulk_update()` doesn't go through `update()` in Django
+    6, so only the trigger caught it, as a raw IntegrityError. The queryset now refuses
+    `bulk_update()` with `HistoryIsImmutable` before anything reaches the database.
+- **Atomicity confirmed:**
+  - **Service tests:** creation runs inside one `transaction.atomic()`, and a failed history write
+    leaves no application.
+  - **New view-level test:** a real form POST where the history write fails leaves no
+    application and no history.
+- No stubs, TODOs or debug code remain. The temporary `application_detail` stub route and the
+  pipeline placeholder view were replaced. Only `staff` still uses a placeholder, until a later
+  phase.
+- No credentials, `db.sqlite3`, built CSS, Tailwind CLI binary or `__pycache__` are in the
+  commit. Every changed text file was confirmed to be valid UTF-8.
+
+**Final verification:**
+- `ruff check` and `ruff format --check` are clean; `manage.py check` reports no issues;
+  `makemigrations --check` and `migrate --check` are clean.
+- **270 of 270 tests pass:** 189 from Phases 1–3 and 81 from Phase 4.
+- Committed as "Phase 4: applications and stage history" and pushed to `main`. Phase 5 has not
+  been started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

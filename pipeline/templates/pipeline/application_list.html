@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Applications{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Applications</h1>
+    <p class="text-sm text-base-content/70">On open and closed jobs, most recently changed first.</p>
+  </div>
+  {% if perms.pipeline.add_application %}
+  <a href="{% url 'pipeline:application_create' %}" class="btn btn-primary btn-sm">New application</a>
+  {% endif %}
+</div>
+
+{% url 'pipeline:application_list' as list_url %}
+<nav aria-label="Filter by stage" class="flex flex-wrap gap-2">
+  <a href="{{ list_url }}" class="btn btn-sm{% if not stage %} btn-active{% endif %}"{% if not stage %} aria-current="page"{% endif %}>All</a>
+  {% for option in stages %}
+  <a href="{{ list_url }}?stage={{ option.value }}" class="btn btn-sm{% if option == stage %} btn-active{% endif %}"{% if option == stage %} aria-current="page"{% endif %}>{{ option.label }}</a>
+  {% endfor %}
+</nav>
+
+<section class="card bg-base-100 shadow-sm">
+  <div class="card-body p-0">
+    {% if applications %}
+    <div class="overflow-x-auto">
+      <table class="table">
+        {% if stage %}<caption class="p-4 text-left text-sm">Applications at {{ stage.label }}</caption>{% endif %}
+        <thead>
+          <tr><th scope="col">Candidate</th><th scope="col">Job opening</th><th scope="col">Stage</th><th scope="col">Stage changed</th></tr>
+        </thead>
+        <tbody>
+          {% for application in applications %}
+          <tr>
+            <td><a href="{{ application.get_absolute_url }}" class="link link-hover font-medium">{{ application.candidate }}</a></td>
+            <td><a href="{{ application.job_opening.get_absolute_url }}" class="link link-hover">{{ application.job_opening }}</a></td>
+            <td>{% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %}</td>
+            <td class="whitespace-nowrap">{{ application.stage_changed_at|date:"M j, Y" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% elif stage %}
+    <p class="p-6">No applications at {{ stage.label }}.</p>
+    {% else %}
+    <p class="p-6">No applications yet.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

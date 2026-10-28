@@ -35,6 +35,39 @@
   </div>
 </section>
 
+<section class="card bg-base-100 shadow-sm" aria-labelledby="applications-heading">
+  <div class="card-body p-0">
+    <div class="flex flex-wrap items-center justify-between gap-3 px-6 pt-6">
+      <h2 id="applications-heading" class="card-title">Applications</h2>
+      {% if candidate.archived_at %}
+      <p class="text-sm text-base-content/70">Archived candidates can't get new applications.</p>
+      {% elif perms.pipeline.add_application %}
+      <a href="{% url 'pipeline:application_create' %}?candidate={{ candidate.pk }}" class="btn btn-primary btn-sm">New application</a>
+      {% endif %}
+    </div>
+    {% if applications %}
+    <div class="overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr><th scope="col">Job opening</th><th scope="col">Stage</th><th scope="col">Stage changed</th></tr>
+        </thead>
+        <tbody>
+          {% for application in applications %}
+          <tr>
+            <td><a href="{{ application.get_absolute_url }}" class="link link-hover font-medium">{{ application.job_opening }}</a></td>
+            <td>{% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %}</td>
+            <td class="whitespace-nowrap">{{ application.stage_changed_at|date:"M j, Y" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="px-6 pb-6">No applications yet.</p>
+    {% endif %}
+  </div>
+</section>
+
 <section class="card bg-base-100 shadow-sm" aria-labelledby="notes-heading">
   <div class="card-body">
     <h2 id="notes-heading" class="card-title">Notes</h2>
