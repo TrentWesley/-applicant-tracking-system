@@ -41,7 +41,7 @@
           {% if user_is_admin %}
           <li class="menu-title mt-4">Admin</li>
           {% include "core/_nav_link.html" with route="jobs:skill_list" label="Skills" section="jobs:skill_" %}
-          {% include "core/_nav_link.html" with route="staff:staff_list" label="Staff Management" %}
+          {% include "core/_nav_link.html" with route="staff:staff_list" label="Staff Management" section="staff:" %}
           {% endif %}
         </ul>
       </nav>

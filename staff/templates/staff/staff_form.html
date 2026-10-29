@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Add staff account{% endblock %}
+
+{% block content %}
+<div>
+  <a href="{% url 'staff:staff_list' %}" class="link link-hover text-sm">← Staff Management</a>
+  <h1 class="text-2xl font-bold">Add staff account</h1>
+  <p class="text-sm text-base-content/70">The new account can log in straight away with this password.</p>
+</div>
+
+<section class="card max-w-xl bg-base-100 shadow-sm">
+  <form method="post" class="card-body" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-error" role="alert">{% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}</div>{% endif %}
+    {% include "core/_field.html" with field=form.username %}
+    {% include "core/_field.html" with field=form.first_name %}
+    {% include "core/_field.html" with field=form.last_name %}
+    {% include "core/_field.html" with field=form.email %}
+    {% include "core/_field.html" with field=form.role %}
+    {% include "core/_field.html" with field=form.password1 %}
+    {% include "core/_field.html" with field=form.password2 %}
+    <div class="card-actions mt-2">
+      <button type="submit" class="btn btn-primary">Add staff account</button>
+      <a href="{% url 'staff:staff_list' %}" class="btn btn-ghost">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

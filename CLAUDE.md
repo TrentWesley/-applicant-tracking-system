@@ -64,7 +64,12 @@ uv run python manage.py check
   `pipeline.tests.utils.make_application` (creates through the service with a unique candidate;
   a `stage=` argument is set directly as test setup, so only the creation entry is in its
   history).
-- `staff`: staff management over Django's built-in `User` (no custom user model).
+- `staff`: staff management over Django's built-in `User` (no custom user model). Admin pages
+  (`auth` user permissions): `/staff/` (`?show=inactive` adds inactive accounts), `/staff/new/`
+  (`StaffCreateForm`: Django's `UserCreationForm` plus required name and case-insensitively unique
+  email, and a role), POST `/staff/<pk>/role/` (`role=Admin|Recruiter`), `/deactivate/` and
+  `/reactivate/`. Changes go only through `staff/services.py` (`deactivate_staff`,
+  `reactivate_staff`, `change_role`, `set_role`), which raise `StaffChangeRefused`.
 
 ## Conventions
 
@@ -148,6 +153,14 @@ uv run python manage.py check
   that trigger for the flush and restores it, because Django's flush order varies between runs;
   `TransactionTestCase` teardown uses it too. Service refusals raise `StageChangeRefused` with the
   user-facing message.
+- **Staff accounts:** never deleted (no delete permission or action). Deactivate and Reactivate
+  touch only `is_active`; Change role swaps only the Admin/Recruiter group. An Admin can't
+  deactivate or demote themselves, and nobody can deactivate or demote the last active Admin
+  (`active_admin_ids`: active users in the Admin group or superusers). A superuser can't be
+  demoted in the app, and the app never sets `is_superuser`. Each check reads the stored account
+  inside the write's `atomic()` (IMMEDIATE), so concurrent Admin changes are serialised;
+  `staff/tests/test_concurrency.py` proves it with real threads (`concurrency_worker.py staff`).
+  The list renders only allowed buttons, using `deactivation_blocker` and `role_change_blocker`.
 - **Admin permanent deletes:** `core.views.AdminDeleteView` (GET confirmation page
   `core/confirm_delete.html`, POST delete) with a `delete` permission, which only Admins have.
   Services `delete_candidate`, `delete_job`, `delete_application` call

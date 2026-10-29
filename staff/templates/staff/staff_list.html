@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Staff Management{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Staff Management</h1>
+    <p class="text-sm text-base-content/70">{% if show_inactive %}All staff accounts, including inactive ones.{% else %}Active staff accounts. Deactivated staff can't log in; their names stay on history.{% endif %}</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    {% if show_inactive %}
+    <a href="{% url 'staff:staff_list' %}" class="btn btn-sm">Hide inactive</a>
+    {% else %}
+    <a href="{% url 'staff:staff_list' %}?show=inactive" class="btn btn-sm">Show inactive</a>
+    {% endif %}
+    <a href="{% url 'staff:staff_create' %}" class="btn btn-primary btn-sm">Add staff account</a>
+  </div>
+</div>
+
+<section class="card bg-base-100 shadow-sm">
+  <div class="card-body p-0">
+    <div class="overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Username</th>
+            <th scope="col">Email</th>
+            <th scope="col">Role</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for member in staff %}
+          <tr>
+            <td class="font-medium">{{ member.get_full_name|default:member.get_username }}{% if member.pk == user.pk %} <span class="badge badge-sm badge-ghost">You</span>{% endif %}</td>
+            <td>{{ member.get_username }}</td>
+            <td>{{ member.email }}</td>
+            <td>{% if member.role %}<span class="badge badge-sm {% if member.role == 'Admin' %}badge-primary{% else %}badge-ghost{% endif %}">{{ member.role }}</span>{% else %}<span class="text-base-content/70">No role</span>{% endif %}</td>
+            <td><span class="badge badge-sm {% if member.is_active %}badge-success{% else %}badge-neutral{% endif %}">{% if member.is_active %}Active{% else %}Inactive{% endif %}</span></td>
+            <td>
+              <div class="flex flex-wrap justify-end gap-2">
+                {% for role in member.new_roles %}
+                <form method="post" action="{% url 'staff:staff_role' member.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="role" value="{{ role }}">
+                  {% if show_inactive %}<input type="hidden" name="show" value="inactive">{% endif %}
+                  <button type="submit" class="btn btn-xs">Make {{ role }}<span class="sr-only">: {{ member.get_full_name|default:member.get_username }}</span></button>
+                </form>
+                {% endfor %}
+                {% if member.is_active %}
+                {% if member.can_deactivate %}
+                <form method="post" action="{% url 'staff:staff_deactivate' member.pk %}">
+                  {% csrf_token %}
+                  {% if show_inactive %}<input type="hidden" name="show" value="inactive">{% endif %}
+                  <button type="submit" class="btn btn-xs btn-outline btn-error">Deactivate<span class="sr-only"> {{ member.get_full_name|default:member.get_username }}</span></button>
+                </form>
+                {% endif %}
+                {% else %}
+                <form method="post" action="{% url 'staff:staff_reactivate' member.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="show" value="inactive">
+                  <button type="submit" class="btn btn-xs btn-outline btn-success">Reactivate<span class="sr-only"> {{ member.get_full_name|default:member.get_username }}</span></button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6">No staff accounts to show.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

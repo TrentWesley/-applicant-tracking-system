@@ -2722,6 +2722,120 @@ deletion safeguards" and pushed to `main`. Phase 11 not started.
 
 ---
 
+## Entry 28
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 11, staff management (US 50-54; AC2, AC35-AC39)
+
+**Prompt:**
+```
+/implement Phase 11 of my Applicant Tracking System using the approved plan. Read CLAUDE.md, the
+PRD, the plan and PROMPTS.md; review the User model, Recruiter and Admin groups, permissions and
+staff architecture. Implement only Phase 11: staff creation, listing, role assignment, and
+activation/deactivation, restricted to Admins (Recruiters refused even on direct requests).
+Preserve the permission structure. Prevent an Admin deactivating or demoting themselves and
+prevent the system being left without an active Admin, enforced server-side. POST and CSRF for
+state changes; handle stale, repeated and concurrent Admin changes safely; preserve Phases 1-10.
+Strict TDD, including self-protection, last-active-Admin and concurrency regression tests, and
+checks that refusals change nothing. Ask about ambiguities first. Run the full suite, Ruff, Django
+system and migration checks; update PROMPTS.md. Stop for review; don't commit or push; don't
+begin Phase 12.
+```
+
+**Ambiguities asked first** (the recommended option was chosen for each):
+1. **Superusers:** active superusers count toward the active-Admin total. The app refuses to
+   demote a superuser (removing the Admin group would change nothing while `is_superuser` makes
+   them an Admin), and it never sets or clears `is_superuser`. Deactivating one follows the
+   normal self and last-Admin rules.
+2. **Email:** required, and unique ignoring case among staff accounts (a form check, like
+   candidate email). Username keeps Django's case-insensitive unique check.
+3. **Password:** a password and a confirmation, checked by `AUTH_PASSWORD_VALIDATORS` (Django's
+   `UserCreationForm`). There's no password-reset or edit page (not in the plan).
+4. **Confirmation:** one-click POST buttons on the staff list, like Close/Reopen; repeated or
+   stale requests are refused with a message.
+
+**Other decisions** (defaults, not asked):
+- First and last name are required, because names appear on every history entry.
+- Views check the `auth` user permissions the Admin group already has (`view_user` plus
+  `add_user` or `change_user`), following `StaffPermissionMixin`. Group permissions are unchanged
+  (no migration).
+- An account with no role (possible only from the shell) gets both Make Admin and Make Recruiter
+  buttons.
+- Demoting an *inactive* Admin is allowed: it can't affect the active-Admin count.
+- `?show=inactive` lists all accounts with an Active/Inactive badge. Actions posted from that
+  view return to it.
+- The now-unused `core.views.placeholder` and `core/placeholder.html` were removed (Staff was the
+  last placeholder page).
+
+**Red:** 64 tests in `staff/tests/` were written first. They failed for the expected reasons:
+`staff.services` didn't exist, and `staff:staff_create` didn't resolve.
+- `test_services.py` (21): deactivate, reactivate and role changes change only their own column
+  or group; self, last-active-Admin, superuser, repeated, stale and unknown-role refusals; each
+  refusal is checked against a snapshot of every account (activation, superuser flag, groups,
+  direct permissions, password hash, name, email).
+- `test_views.py` (40): list and `?show=inactive`; buttons hidden for self, the last active
+  Admin and superuser demotion; CSRF POST forms; creating a Recruiter and an Admin (AC35); field
+  validation, duplicate email and username, passwords, and posting `is_superuser`; deactivate,
+  reactivate and role views, including direct-POST self and last-Admin refusals (AC38);
+  deactivated users can't log in and an open session ends (AC36); names stay on Application and
+  StageChange, and reactivation leaves them unchanged (AC36, AC37); 403 with nothing changed for a
+  Recruiter on all seven staff requests (AC2, AC37); anonymous redirects; PROTECT on users (AC39).
+- `test_concurrency.py` (3): the only two active Admins act on each other at the same moment on
+  real threads (deactivate/deactivate, demote/demote, deactivate/demote). The first succeeds, the
+  second is refused as the last active Admin, and exactly one active Admin remains.
+
+Two test mistakes were then fixed: three service tests created their "manager" account after the
+snapshot, and the create test's `assertRedirects` consumed the success message before it was
+checked.
+
+**Green:**
+- `staff/services.py`: `deactivate_staff`, `reactivate_staff`, `change_role`, `set_role`,
+  `deactivation_blocker`, `role_change_blocker` and `active_admin_ids`. Each check reads the
+  stored account inside the write's `transaction.atomic()`; with `transaction_mode = "IMMEDIATE"`
+  concurrent requests are serialised. Check order: self → already in that state → superuser
+  (demote) → last active Admin.
+- `staff/forms.py`: `StaffCreateForm` (`UserCreationForm` plus name, email, role); it saves the user
+  and the role group in one transaction.
+- `staff/views.py`, `staff/urls.py`, `staff/templates/staff/`: the list (allowed buttons only,
+  one active-Admin query per page), the create page, and POST-only Deactivate, Reactivate and
+  Role views that redirect with a success or refusal message.
+- `templates/base.html`: the Staff Management link uses `section="staff:"`, so the create page
+  highlights it too.
+- `candidates/tests/concurrency_worker.py`: a `staff` scenario group.
+
+**Mutation check:** moving the deactivate check outside its transaction made two of the three
+real-thread races leave no active Admin (both tests failed); the original was restored
+byte-identical.
+
+**Verification:**
+- **558 of 558 tests pass:** 494 before, plus 64 new.
+- `ruff check` and `ruff format --check` are clean (120 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Remaining limitations:**
+- A request already in progress from an Admin who is deactivated or demoted at the same moment
+  can still complete an action that doesn't touch the last active Admin (for example deactivating
+  a Recruiter). The same is true of every other page in the app; the lockout rule itself always
+  holds.
+- Superusers can only be created, and have `is_superuser` cleared, outside the app
+  (`createsuperuser`, the shell).
+- There's no password reset or account edit page; neither is in Phase 11.
+
+**Approval and final review:** the implementation, the four design decisions, the 558 passing
+tests, the concurrency safeguards, the permissions and the documented limitations were approved.
+A final review of the diff found only Phase 11 changes (the staff app, its tests, the worker's
+`staff` scenarios, the Staff Management nav highlight, the removed unused placeholder, and the
+CLAUDE.md and PROMPTS.md updates). Re-run before committing: 558 of 558 tests pass; Ruff lint
+and format are clean (120 files); `manage.py check`, `makemigrations --check --dry-run` and
+`migrate --check` are clean.
+
+**Result:** committed as "Phase 11: staff management and admin safeguards" and pushed to `main`.
+Phase 12 not started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

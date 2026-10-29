@@ -4,7 +4,7 @@ real requests on two threads, each with its own connection to a fresh SQLite fil
 the project's settings. (The test database is in-memory and shared between threads, so it can't
 show file locking.)
 
-    python -m candidates.tests.concurrency_worker <database file> [archive|delete]
+    python -m candidates.tests.concurrency_worker <database file> [archive|delete|staff]
 
 Prints one JSON object: for each scenario, what each request returned and the final state.
 """
@@ -38,11 +38,17 @@ def attempt(call):
     from candidates.services import CandidateStatusRefused
     from core.deletion import DeleteRefused
     from pipeline.services import StageChangeRefused
+    from staff.services import StaffChangeRefused
 
     try:
         call()
         return "ok"
-    except (CandidateStatusRefused, DeleteRefused, StageChangeRefused) as refusal:
+    except (
+        CandidateStatusRefused,
+        DeleteRefused,
+        StageChangeRefused,
+        StaffChangeRefused,
+    ) as refusal:
         return f"refused: {refusal}"
     except ObjectDoesNotExist:
         return "missing"  # the view turns this into a 404
@@ -121,6 +127,43 @@ def delete_scenarios(user, job):
     return report
 
 
+def staff_scenarios():
+    """The only two active Admins acting on each other: Ada first, Grace during Ada's pause."""
+    from django.contrib.auth.models import Group, User
+
+    from core.roles import ADMIN, RECRUITER
+    from staff.services import change_role, deactivate_staff
+
+    def deactivate(target, by):
+        return lambda: deactivate_staff(User.objects.get(pk=target.pk), by=by)
+
+    def demote(target, by):
+        return lambda: change_role(User.objects.get(pk=target.pk), RECRUITER, by=by)
+
+    report = {}
+    for scenario, first, second in (
+        ("deactivate_both", deactivate, deactivate),
+        ("demote_both", demote, demote),
+        ("deactivate_and_demote", deactivate, demote),
+    ):
+        ada, grace = (
+            User.objects.create_user(f"{name}-{scenario}", first_name=name.capitalize())
+            for name in ("ada", "grace")
+        )
+        for user in (ada, grace):
+            user.groups.add(Group.objects.get(name=ADMIN))
+        results = race(first(grace, ada), second(ada, grace), "staff.services.active_admin_ids")
+        results["active_admins"] = sorted(
+            user.username.split("-")[0]
+            for user in User.objects.filter(pk__in=[ada.pk, grace.pk], is_active=True)
+            if user.groups.filter(name=ADMIN).exists()
+        )
+        # Retire this pair so the next scenario starts with exactly two active Admins.
+        User.objects.filter(pk__in=[ada.pk, grace.pk]).update(is_active=False)
+        report[scenario] = results
+    return report
+
+
 def main(db_path, group="archive"):
     configure(db_path)
     from django.contrib.auth.models import User
@@ -136,6 +179,9 @@ def main(db_path, group="archive"):
     )
     if group == "delete":
         print(json.dumps(delete_scenarios(user, job)))
+        return
+    if group == "staff":
+        print(json.dumps(staff_scenarios()))
         return
     report = {}
     for scenario in ("create_first", "archive_first"):
