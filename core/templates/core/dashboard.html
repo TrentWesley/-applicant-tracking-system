@@ -5,13 +5,117 @@
 {% block content %}
 <div>
   <h1 class="text-2xl font-bold">Dashboard</h1>
-  <p class="text-sm text-base-content/70">Welcome, {{ user.get_short_name|default:user.get_username }}.</p>
+  <p class="text-sm text-base-content/70">{% now "l, F j" %} · Welcome, {{ user.get_short_name|default:user.get_username }}.</p>
 </div>
 
-<section class="card bg-base-100 shadow-sm">
-  <div class="card-body">
-    <h2 class="card-title">Hiring overview</h2>
-    <p>Summary counts, the hiring pipeline, items that need attention and recent activity will appear here once candidates, job openings and applications are being tracked.</p>
+<section aria-labelledby="summary-heading">
+  <h2 id="summary-heading" class="sr-only">Summary</h2>
+  <div class="stats stats-vertical w-full bg-base-100 shadow-sm sm:stats-horizontal">
+    <div class="stat">
+      <div class="stat-title">Open job openings</div>
+      <div class="stat-value">{{ summary.open_jobs }}</div>
+      <div class="stat-desc">{{ summary.closed_jobs }} closed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Active applications</div>
+      <div class="stat-value text-primary">{{ summary.active }}</div>
+      <div class="stat-desc">Includes closed jobs</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Total hires</div>
+      <div class="stat-value">{{ summary.hires }}</div>
+      <div class="stat-desc">All time</div>
+    </div>
   </div>
 </section>
+
+<section class="card bg-base-100 shadow-sm" aria-labelledby="pipeline-heading">
+  <div class="card-body">
+    <h2 id="pipeline-heading" class="card-title">Hiring pipeline</h2>
+    <p class="text-sm text-base-content/70">Active applications by stage, on open and closed jobs.</p>
+    <div class="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      {% for card in pipeline %}
+      <a href="{{ card.url }}" class="rounded-box border border-base-300 p-4 transition-colors hover:border-primary">
+        <div class="text-sm text-base-content/70">{{ card.stage.label }}</div>
+        <div class="my-1 text-3xl font-bold">{{ card.count }}</div>
+        <progress class="progress progress-primary w-full" value="{{ card.count }}" max="{{ pipeline_max }}" aria-hidden="true"></progress>
+        <div class="mt-2 text-xs text-primary">View list<span class="sr-only"> of {{ card.stage.label }} applications</span> →</div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<div class="grid grid-cols-1 gap-6 lg:grid-cols-5">
+  <section id="needs-attention" class="card bg-base-100 shadow-sm lg:col-span-2" aria-labelledby="attention-heading">
+    <div class="card-body">
+      <h2 id="attention-heading" class="card-title">Needs attention</h2>
+
+      <h3 class="mt-2 text-xs uppercase tracking-wide text-base-content/70">Closed jobs with active applications</h3>
+      {% if closed_jobs %}
+      <ul class="divide-y divide-base-300">
+        {% for job in closed_jobs %}
+        <li class="flex items-center justify-between gap-2 py-2">
+          <div class="min-w-0">
+            <div class="font-medium">{{ job.title }}</div>
+            <div class="text-xs text-base-content/70">{{ job.active_count }} active application{{ job.active_count|pluralize }}</div>
+          </div>
+          <a href="{{ job.get_absolute_url }}" class="btn btn-xs">Review<span class="sr-only"> {{ job.title }}</span></a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-sm text-base-content/70">No closed jobs have active applications.</p>
+      {% endif %}
+
+      <h3 class="mt-3 text-xs uppercase tracking-wide text-base-content/70">Applications at Offer</h3>
+      {% if offers %}
+      <ul class="divide-y divide-base-300">
+        {% for application in offers %}
+        <li class="flex items-center justify-between gap-2 py-2">
+          <div class="min-w-0">
+            <div class="font-medium">{{ application.candidate }}</div>
+            <div class="flex flex-wrap items-center gap-1 text-xs text-base-content/70">{{ application.job_opening }}{% if application.job_opening.status == "closed" %} {% include "core/_job_status_badge.html" with job=application.job_opening %}{% endif %}</div>
+          </div>
+          <a href="{{ application.get_absolute_url }}" class="btn btn-xs">Open<span class="sr-only"> {{ application }}</span></a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-sm text-base-content/70">No applications are at Offer.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card bg-base-100 shadow-sm lg:col-span-3" aria-labelledby="activity-heading">
+    <div class="card-body">
+      <h2 id="activity-heading" class="card-title">Recent activity</h2>
+      {% if recent_activity %}
+      <div class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead>
+            <tr><th scope="col">When</th><th scope="col">Application</th><th scope="col">Change</th><th scope="col">By</th></tr>
+          </thead>
+          <tbody>
+            {% for change in recent_activity %}
+            <tr>
+              <td class="whitespace-nowrap text-xs text-base-content/70">{{ change.changed_at|date:"M j, g:i a" }}</td>
+              <td>
+                <a href="{{ change.application.get_absolute_url }}" class="link link-hover font-medium">{{ change.application.candidate }}</a>
+                <div class="text-xs text-base-content/70">{{ change.application.job_opening }}</div>
+                {% if change.note %}<div class="mt-1 text-xs italic text-base-content/70">“{{ change.note }}”</div>{% endif %}
+              </td>
+              <td class="whitespace-nowrap">{% if change.from_stage %}{% include "core/_stage_badge.html" with stage=change.from_stage label=change.get_from_stage_display %}{% else %}<span class="text-xs text-base-content/70">New</span>{% endif %}<span class="mx-1 text-base-content/70" aria-label="to">→</span>{% include "core/_stage_badge.html" with stage=change.to_stage label=change.get_to_stage_display %}</td>
+              <td class="text-sm">{{ change.changed_by.get_full_name|default:change.changed_by.get_username }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-sm text-base-content/70">No stage changes yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
 {% endblock %}

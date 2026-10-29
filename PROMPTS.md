@@ -2836,6 +2836,117 @@ Phase 12 not started.
 
 ---
 
+## Entry 29
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 12, the dashboard (US 55-58; AC40-AC43)
+
+**Prompt:**
+```
+/implement Phase 12 of my Applicant Tracking System using the approved plan. Read CLAUDE.md, the
+PRD, the plan and PROMPTS.md; review the dashboard placeholder, candidate and job models,
+application stages, stage history and permissions. Implement only the Phase 12 dashboard:
+summary counts, Needs Attention and hiring history, calculated from real records, honouring
+closed jobs, archived candidates and stage rules, with the precise Needs Attention eligibility
+and ordering. Show history from the immutable StageChange records. Respect permissions; keep it
+responsive and consistent with Tailwind/DaisyUI; avoid per-record queries; preserve Phases 1-11.
+Strict Red-Green-Refactor, including tests for closed jobs, archived candidates, terminal
+stages, empty states and that dashboard requests modify nothing. Ask about ambiguities first. Run
+the full suite, Ruff, Django system and migration checks; update PROMPTS.md and CLAUDE.md. Stop
+for review; don't commit or push; don't begin Phase 13.
+```
+
+**Ambiguities asked first** (the recommended option was chosen for each):
+1. **Needs Attention order:** closed jobs by most active applications, then title A-Z (then pk);
+   Offer applications longest at Offer first (oldest `stage_changed_at`), then pk.
+2. **No cap:** both lists show every matching item.
+3. **No header buttons:** only the heading, today's date and a welcome line (the PRD's decision
+   that the dashboard doesn't get New Application).
+
+**Other decisions** (defaults, not asked):
+- **Permission:** `DashboardView` requires view permission on candidates, jobs and applications
+  (both roles have them). A signed-in user with no role gets 403, like every other data page;
+  before, the placeholder dashboard showed no data, so it needed no check.
+- **Archived candidates** need no separate rule: an archived candidate never has an active
+  application (the Phase 8 database guards), and hires count every Hired application.
+- **Badges:** the existing stage badges in Recent Activity, and the existing Job Closed badge on
+  Offer rows for closed jobs. Awaiting Decision and the full badge pass are Phase 13.
+- **Recent Activity:** creation entries show "New → Applied"; a note shows under the application;
+  each row links to the application. A deactivated user's name still shows.
+- **Pipeline bars** are scaled to the largest stage count (at least 1, so an empty dashboard has no
+  zero maximum).
+
+**Red:** 27 tests in `core/tests/test_dashboard.py` were written first. They failed because the
+dashboard context didn't exist, and the role-less user got 200.
+- **Prototype dataset** (`build_prototype_dataset`): the UI prototype's 7 jobs (3 closed) and 36
+  applications, with three candidates archived after final stages (a hire, a hire on a closed job,
+  a rejection). Summary 4 open (3 closed), 25 active, 4 hires (AC40); pipeline 8/6/5/3/3 with
+  each link's list holding the same number (AC41); Needs Attention lists Product Designer (3) and
+  IT Support Specialist (1), not HR Generalist (closed with only hires), and the three Offers
+  longest-waiting first, with Job Closed only on Samuel Moore's (AC42).
+- **Count rules:** active applications on closed jobs count; Hired, Rejected and Withdrawn aren't
+  active; hires include closed jobs and archived candidates; closed jobs with only final
+  applications and open jobs with active ones aren't listed; ordering and ties; reopening a job
+  removes it from Needs Attention.
+- **Recent Activity** (AC43): 12 StageChanges with times deliberately out of pk order; exactly the
+  10 newest render, newest first; row content; a deactivated mover's name; viewing never changes
+  history.
+- **Reads only:** a dashboard GET leaves every Application, StageChange, Candidate, JobOpening
+  and User row unchanged and runs only SELECTs. The query count is the same for an empty
+  database and the full dataset.
+- **Empty states** for every section; **access:** both roles land on the dashboard after login and
+  see the same numbers; no role gets 403; anonymous redirects to login.
+
+Two test-setup mistakes were then fixed: the tests created applications on already-closed jobs,
+which the service refuses (jobs are now closed after their applications exist), and an
+assertion that HR Generalist is absent from the page also matched Recent Activity (it now checks
+the Needs Attention section only).
+
+**Green:**
+- `core/dashboard.py`: `summary_and_pipeline` (one aggregate query on jobs, one on applications),
+  `closed_jobs_with_active_applications`, `applications_at_offer`, `recent_activity`
+  (`select_related`, sliced to 10) and `dashboard_context`.
+- `core/views.py`: `DashboardView` (`StaffPermissionMixin`, `TemplateView`); `core/urls.py` uses it.
+- `core/templates/core/dashboard.html`: variant A: DaisyUI stat tiles, five pipeline cards with
+  progress bars, Needs Attention and Recent Activity cards in a `grid-cols-1 lg:grid-cols-5` grid;
+  the activity table scrolls inside its card.
+
+**Mutation checks** (each original restored and confirmed byte-identical):
+- counting active applications on open jobs only → 4 failures;
+- excluding archived candidates from hires → 3 failures;
+- counting all of a closed job's applications instead of active ones → 3 failures;
+- ordering Recent Activity by pk instead of time → 1 failure.
+
+**Visual check:** the dashboard was rendered with the prototype dataset in a scratch SQLite file
+(deleted afterwards) and screenshotted in headless Edge at desktop width. In a 375 px iframe
+the page's scroll width equals its client width, and no element outside a scrolling table
+crosses the edge.
+
+**Verification:**
+- **585 of 585 tests pass:** 558 before, plus 27 new.
+- `ruff check` and `ruff format --check` are clean (122 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Remaining limitations:**
+- Needs Attention isn't capped; a very large number of closed jobs or Offers makes a long card.
+- Times use the server's time zone setting, like the rest of the app.
+
+**Approval and final review (2026-10-29):** the dashboard implementation, the three design
+decisions, the 585 passing tests, the counts, Needs Attention ordering and eligibility, Recent
+Activity, the permission checks, the responsive layout and the documented limitations were
+approved. A final review of the diff found only Phase 12 changes (`core/dashboard.py`,
+`DashboardView` and its URL, the dashboard template, `core/tests/test_dashboard.py`, and the
+CLAUDE.md and PROMPTS.md updates); the rebuilt Tailwind CSS stays gitignored. Re-run before
+committing: 585 of 585 tests pass; Ruff lint and format are clean (122 files);
+`manage.py check`, `makemigrations --check --dry-run` and `migrate --check` are clean.
+
+**Result:** committed as "Phase 12: dashboard and needs attention" and pushed to `main`.
+Phase 13 not started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

@@ -1,9 +1,9 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import PermissionRequiredMixin
 from django.http import HttpResponseRedirect
-from django.shortcuts import render
-from django.views.generic import DeleteView
+from django.views.generic import DeleteView, TemplateView
 
+from core.dashboard import dashboard_context
 from core.deletion import DeleteRefused
 
 
@@ -17,8 +17,18 @@ class StaffPermissionMixin(PermissionRequiredMixin):
     raise_exception = True
 
 
-def dashboard(request):
-    return render(request, "core/dashboard.html")
+class DashboardView(StaffPermissionMixin, TemplateView):
+    """The start page for both roles. It only reads (core/dashboard.py)."""
+
+    permission_required = (
+        "candidates.view_candidate",
+        "jobs.view_jobopening",
+        "pipeline.view_application",
+    )
+    template_name = "core/dashboard.html"
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(**dashboard_context(), **kwargs)
 
 
 class AdminDeleteView(StaffPermissionMixin, DeleteView):

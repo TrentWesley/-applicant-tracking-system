@@ -153,6 +153,15 @@ uv run python manage.py check
   that trigger for the flush and restores it, because Django's flush order varies between runs;
   `TransactionTestCase` teardown uses it too. Service refusals raise `StageChangeRefused` with the
   user-facing message.
+- **Dashboard:** `core.views.DashboardView` at `/` (view permission on candidates, jobs and
+  applications, so both roles; a user with no role gets 403). Its four sections are read-only
+  queries in `core/dashboard.py` (`dashboard_context`): summary tiles and pipeline from two
+  aggregate queries; closed jobs with active applications (most active first, then title); Offer
+  applications (longest at Offer first, then pk); and the 10 newest StageChanges
+  (`-changed_at, -pk`). Active means the five active stages on open and closed jobs; hires count
+  every Hired application, including archived candidates. The query count doesn't grow with the
+  data (`core/tests/test_dashboard.py` checks it, and that a GET writes nothing). Its test
+  dataset `build_prototype_dataset()` mirrors the UI prototype (7 jobs, 36 applications).
 - **Staff accounts:** never deleted (no delete permission or action). Deactivate and Reactivate
   touch only `is_active`; Change role swaps only the Admin/Recruiter group. An Admin can't
   deactivate or demote themselves, and nobody can deactivate or demote the last active Admin
