@@ -1,0 +1,1 @@
+{% comment %}Pass `application`. Marks an application whose current stage is Offer; never used on history rows, which are past moves.{% endcomment %}{% if application.stage == "offer" %}<span class="badge badge-sm badge-outline border-warning text-base-content whitespace-nowrap">Awaiting Decision</span>{% endif %}

@@ -144,6 +144,26 @@ uv run python manage.py check
 - **Stage badges:** `core/_stage_badge.html` with `stage=` and `label=` (e.g.
   `label=application.get_stage_display`); one style each for early active stages, Offer, Hired, and
   Rejected/Withdrawn.
+- **Badges everywhere (Phase 13):**
+  - **Awaiting Decision:** `core/_awaiting_decision_badge.html` (pass `application`) sits beside
+    the stage badge wherever an application's *current* stage is shown. That's the application
+    list, the stage card, the candidate and job application tables, and the dashboard's Offer
+    list. It never goes on stage-history or Recent Activity rows, which are past moves.
+  - **Job Closed:** marks a closed job, and each of its applications, wherever they appear
+    outside that job's own page (which already shows it in Details).
+  - **Hired for…:** a `badge-success` link per Hired application on the candidate page,
+    archived candidates included.
+  - **Archived:** a neutral badge marks archived candidates on the job page's applications list.
+- **Detail summaries:** `JobDetailView` loads the job's applications once (with candidates) and
+  derives `counts` (`total`, `active`, `hired`, archived candidates included) from those rows.
+  `CandidateDetailView` derives `hired` from its applications list the same way.
+- **Review tests:** `core/tests/test_permission_review.py` walks every row of the PRD
+  permission table for Recruiter, Admin, a no-role user and anonymous users, each request in a
+  rolled-back transaction. Its `ReviewData.cases()` must name every namespaced URL (a test
+  checks), so add new pages there. `core/tests/test_accessibility.py` parses every page in that
+  table for one `<h1>`, no skipped heading levels, labelled controls, named links and buttons,
+  scoped `<th>`s, and tables inside `overflow-x-auto`. `core.tests.utils.database_state()`
+  snapshots every row, and `queries_for(client, url)` counts a page's queries.
 - **StageChange is append-only:** the model refuses `save()` on an existing row and `delete()`,
   the queryset refuses `update()`, `bulk_update()` and `delete()`, and a SQLite trigger (`pipeline/0002`) refuses any
   `UPDATE`. A second trigger (`pipeline/0005`) refuses deleting any row unless its application

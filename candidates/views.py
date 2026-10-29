@@ -15,6 +15,7 @@ from candidates.services import (
     restore_candidate,
 )
 from core.views import AdminDeleteView, StaffPermissionMixin
+from pipeline.models import Stage
 
 
 class CandidateListView(StaffPermissionMixin, ListView):
@@ -33,8 +34,10 @@ class CandidateDetailView(StaffPermissionMixin, DetailView):
     model = Candidate
 
     def get_context_data(self, **kwargs):
-        applications = self.object.applications.select_related("job_opening")
-        return super().get_context_data(applications=applications, **kwargs)
+        applications = list(self.object.applications.select_related("job_opening"))
+        # "Hired for…" (US 19): shown for archived candidates too.
+        hired = [a for a in applications if a.stage == Stage.HIRED]
+        return super().get_context_data(applications=applications, hired=hired, **kwargs)
 
 
 class CandidateCreateView(StaffPermissionMixin, SuccessMessageMixin, CreateView):

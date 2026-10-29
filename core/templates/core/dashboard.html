@@ -58,7 +58,7 @@
         <li class="flex items-center justify-between gap-2 py-2">
           <div class="min-w-0">
             <div class="font-medium">{{ job.title }}</div>
-            <div class="text-xs text-base-content/70">{{ job.active_count }} active application{{ job.active_count|pluralize }}</div>
+            <div class="flex flex-wrap items-center gap-1 text-xs text-base-content/70">{{ job.active_count }} active application{{ job.active_count|pluralize }} {% include "core/_job_status_badge.html" %}</div>
           </div>
           <a href="{{ job.get_absolute_url }}" class="btn btn-xs">Review<span class="sr-only"> {{ job.title }}</span></a>
         </li>
@@ -74,7 +74,7 @@
         {% for application in offers %}
         <li class="flex items-center justify-between gap-2 py-2">
           <div class="min-w-0">
-            <div class="font-medium">{{ application.candidate }}</div>
+            <div class="flex flex-wrap items-center gap-1 font-medium">{{ application.candidate }} {% include "core/_awaiting_decision_badge.html" %}</div>
             <div class="flex flex-wrap items-center gap-1 text-xs text-base-content/70">{{ application.job_opening }}{% if application.job_opening.status == "closed" %} {% include "core/_job_status_badge.html" with job=application.job_opening %}{% endif %}</div>
           </div>
           <a href="{{ application.get_absolute_url }}" class="btn btn-xs">Open<span class="sr-only"> {{ application }}</span></a>
@@ -102,7 +102,7 @@
               <td class="whitespace-nowrap text-xs text-base-content/70">{{ change.changed_at|date:"M j, g:i a" }}</td>
               <td>
                 <a href="{{ change.application.get_absolute_url }}" class="link link-hover font-medium">{{ change.application.candidate }}</a>
-                <div class="text-xs text-base-content/70">{{ change.application.job_opening }}</div>
+                <div class="flex flex-wrap items-center gap-1 text-xs text-base-content/70">{{ change.application.job_opening }}{% if change.application.job_opening.status == "closed" %} {% include "core/_job_status_badge.html" with job=change.application.job_opening %}{% endif %}</div>
                 {% if change.note %}<div class="mt-1 text-xs italic text-base-content/70">“{{ change.note }}”</div>{% endif %}
               </td>
               <td class="whitespace-nowrap">{% if change.from_stage %}{% include "core/_stage_badge.html" with stage=change.from_stage label=change.get_from_stage_display %}{% else %}<span class="text-xs text-base-content/70">New</span>{% endif %}<span class="mx-1 text-base-content/70" aria-label="to">→</span>{% include "core/_stage_badge.html" with stage=change.to_stage label=change.get_to_stage_display %}</td>

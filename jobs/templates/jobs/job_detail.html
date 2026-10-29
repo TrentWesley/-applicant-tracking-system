@@ -18,15 +18,15 @@
     <form method="post" action="{% url 'jobs:job_close' job.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm btn-outline">Close job</button></form>
     {% endif %}
     {# Admin only, and only with no applications; the next page asks to confirm. #}
-    {% if perms.jobs.delete_jobopening and not has_applications %}
+    {% if perms.jobs.delete_jobopening and not applications %}
     <a href="{% url 'jobs:job_delete' job.pk %}" class="btn btn-sm btn-error btn-outline">Delete</a>
     {% endif %}
   </div>
   {% endif %}
 </div>
 
-{% if active_count %}
-<div class="alert alert-warning" role="note">This job is closed but still has {{ active_count }} active application{{ active_count|pluralize }}.</div>
+{% if job.status == "closed" and counts.active %}
+<div class="alert alert-warning" role="note">This job is closed but still has {{ counts.active }} active application{{ counts.active|pluralize }}.</div>
 {% endif %}
 
 <section class="card bg-base-100 shadow-sm" aria-labelledby="details-heading">
@@ -62,6 +62,48 @@
     </ul>
     {% else %}
     <p class="text-base-content/70">No skills listed.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card bg-base-100 shadow-sm" aria-labelledby="applications-heading">
+  <div class="card-body p-0">
+    <div class="px-6 pt-6">
+      <h2 id="applications-heading" class="card-title">Applications</h2>
+    </div>
+    <div class="stats stats-horizontal mx-6 mt-2 border border-base-300">
+      <div class="stat px-4 py-2">
+        <div class="stat-title">Active</div>
+        <div class="stat-value text-2xl" id="job-active-count">{{ counts.active }}</div>
+      </div>
+      <div class="stat px-4 py-2">
+        <div class="stat-title">Hired</div>
+        <div class="stat-value text-2xl" id="job-hired-count">{{ counts.hired }}</div>
+      </div>
+      <div class="stat px-4 py-2">
+        <div class="stat-title">Total</div>
+        <div class="stat-value text-2xl" id="job-total-count">{{ counts.total }}</div>
+      </div>
+    </div>
+    {% if applications %}
+    <div class="mt-2 overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr><th scope="col">Candidate</th><th scope="col">Stage</th><th scope="col">Stage changed</th></tr>
+        </thead>
+        <tbody>
+          {% for application in applications %}
+          <tr>
+            <td><a href="{{ application.get_absolute_url }}" class="link link-hover font-medium">{{ application.candidate }}</a>{% if application.candidate.archived_at %} <span class="badge badge-sm badge-neutral">Archived</span>{% endif %}</td>
+            <td>{% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %} {% include "core/_awaiting_decision_badge.html" %}</td>
+            <td class="whitespace-nowrap">{{ application.stage_changed_at|date:"M j, Y" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="px-6 py-6">No applications yet.</p>
     {% endif %}
   </div>
 </section>

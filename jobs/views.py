@@ -10,10 +10,10 @@ from django.views.generic import CreateView, DeleteView, DetailView, ListView, U
 
 from core.views import AdminDeleteView, StaffPermissionMixin
 from jobs.forms import JobFilterForm, JobOpeningForm, SkillForm
-from jobs.models import JobOpening, JobStatus, Skill
+from jobs.models import JobOpening, Skill
 from jobs.services import JobStatusUnchanged, close_job, delete_job, reopen_job
 from jobs.services import deletion_blocker as job_deletion_blocker
-from pipeline.models import ACTIVE_STAGES
+from pipeline.models import ACTIVE_STAGES, Stage
 
 
 class JobListView(StaffPermissionMixin, ListView):
@@ -43,14 +43,15 @@ class JobDetailView(StaffPermissionMixin, DetailView):
     template_name = "jobs/job_detail.html"
 
     def get_context_data(self, **kwargs):
-        # Shown only on a closed job: unfinished work that still needs attention (US 23).
-        active_count = 0
-        if self.object.status == JobStatus.CLOSED:
-            active_count = self.object.applications.filter(stage__in=ACTIVE_STAGES).count()
-        has_applications = self.object.applications.exists()  # the Admin Delete needs none
-        return super().get_context_data(
-            active_count=active_count, has_applications=has_applications, **kwargs
-        )
+        # Every application, archived candidates included, and the counts from the same rows
+        # (US 25, AC18). A closed job's active count is also the unfinished-work note (US 23).
+        applications = list(self.object.applications.select_related("candidate"))
+        counts = {
+            "total": len(applications),
+            "active": sum(a.stage in ACTIVE_STAGES for a in applications),
+            "hired": sum(a.stage == Stage.HIRED for a in applications),
+        }
+        return super().get_context_data(applications=applications, counts=counts, **kwargs)
 
 
 class JobStatusActionView(StaffPermissionMixin, View):

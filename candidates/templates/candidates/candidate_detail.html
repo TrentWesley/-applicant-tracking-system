@@ -11,6 +11,13 @@
     <a href="{% url 'candidates:candidate_list' %}" class="link link-hover text-sm">← Candidates</a>
     {% endif %}
     <h1 class="flex flex-wrap items-center gap-2 text-2xl font-bold">{{ candidate }}{% if candidate.archived_at %} <span class="badge badge-neutral">Archived</span>{% endif %}</h1>
+    {% if hired %}
+    <ul class="mt-2 flex flex-wrap gap-2" aria-label="Hired for">
+      {% for application in hired %}
+      <li><a href="{{ application.job_opening.get_absolute_url }}" class="badge badge-success">Hired for {{ application.job_opening }}</a></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
   </div>
   {% if perms.candidates.change_candidate %}
   <div class="flex flex-wrap gap-2">
@@ -74,8 +81,8 @@
         <tbody>
           {% for application in applications %}
           <tr>
-            <td><a href="{{ application.get_absolute_url }}" class="link link-hover font-medium">{{ application.job_opening }}</a></td>
-            <td>{% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %}</td>
+            <td><a href="{{ application.get_absolute_url }}" class="link link-hover font-medium">{{ application.job_opening }}</a>{% if application.job_opening.status == "closed" %} {% include "core/_job_status_badge.html" with job=application.job_opening %}{% endif %}</td>
+            <td>{% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %} {% include "core/_awaiting_decision_badge.html" %}</td>
             <td class="whitespace-nowrap">{{ application.stage_changed_at|date:"M j, Y" }}</td>
           </tr>
           {% endfor %}

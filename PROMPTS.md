@@ -2947,6 +2947,142 @@ Phase 13 not started.
 
 ---
 
+## Entry 30
+
+**Date:** 2026-10-29
+
+**Phase:** Phase 13, badges, detail-page summaries and final check (US 19, 25, 60; re-check of
+3, 4, 5, 59; AC1-AC3, AC18, AC44, AC45)
+
+**Prompt:**
+```
+/implement Phase 13 of my Applicant Tracking System using the approved plan. Read CLAUDE.md, the
+PRD, the plan and PROMPTS.md; review Phases 1-12. Complete the remaining status badges
+("Hired for…", Awaiting Decision), the candidate and job detail summaries (the job's
+applications, counts and hired count), accurate for closed jobs, archived candidates and
+terminal stages; finish responsive design and accessibility; reuse existing templates, services
+and badge partials; preserve every Phase 1-12 rule and safeguard; no unrelated features. Strict
+Red-Green-Refactor, including badge visibility, counts, links, permissions, empty states, edge
+cases, responsiveness and accessibility where practical, and that display-only features change
+nothing. Ask about ambiguities first. Run the full suite, Ruff, Django system and migration
+checks; update PROMPTS.md and CLAUDE.md. Stop for review; don't commit or push; don't begin the
+final submission process.
+```
+
+**Ambiguities asked first** (the recommended option was chosen for each):
+1. **"Hired for…":** a green `Hired for <job>` badge per hired job, linked to the job, under the
+   candidate's name (next to Archived). Nothing is shown when they were never hired.
+2. **Awaiting Decision:** only where an application's *current* stage is Offer. That's the
+   application list, the stage card (including its HTMX swap), the candidate and job application
+   tables, and the dashboard's Offer list. Never on stage-history or Recent Activity rows.
+3. **Job Closed coverage:** added to the dashboard's Needs Attention closed-job rows and to
+   Recent Activity rows whose job is closed, plus the new tables. This changed one Phase 12
+   test, which had asserted the closed-job rows were badge-free, to expect 3.
+4. **Job page applications:** every application, newest stage change first, with an Archived
+   badge beside archived candidates. The hired count includes them.
+
+**Other decisions** (defaults, not asked):
+- **Badge colour:** Awaiting Decision is an outlined badge with dark text and a warning-colour
+  border. The first try, `badge-soft badge-warning`, had pale yellow text with too little
+  contrast in the screenshots.
+- **Job page:** no Job Closed on each of its application rows; Details already shows it.
+- **Counts:** the job counts come from the one applications query, not separate COUNT queries.
+- **README:** rewritten with what the app is, how to run it, test and lint commands, and the
+  roles table.
+
+**Red** (39 new tests):
+- `candidates/tests/test_hired_for.py` (8): one linked badge per hired job; other stages excluded;
+  nothing when never hired; shown for archived candidates and closed jobs; the applications table
+  marks Job Closed and Awaiting Decision; viewing changes nothing; the query count doesn't grow.
+- `jobs/tests/test_job_summary.py` (9): total, active and hired counts across stage groups; the
+  hired count includes archived candidates; counts on a closed job alongside the Phase 7 note;
+  each application listed with its stage and link; the Archived badge; Awaiting Decision; the
+  empty state; viewing changes nothing; the query count doesn't grow.
+- `core/tests/test_badges.py` (10 new): Awaiting Decision exactly once on each of six pages for
+  an Offer, right after the Offer badge, and nowhere for the other seven stages or for an
+  application that was at Offer and moved back. It stays once on a detail page whose history
+  includes Offer, and appears and disappears with the HTMX card. Job Closed appears on every page
+  for a closed job, three times on the dashboard, and never for open jobs. Badges are display-only.
+- `core/tests/test_permission_review.py` (6): every row of the PRD permission table, as cases for
+  each page and action. Recruiters are allowed every Recruiter row (a GET 200 that changes nothing;
+  a POST 302 that changes data) and get 403 with no change on every Admin row. Admins are allowed
+  everything. A no-role user is refused everything. Anonymous users are redirected to login with
+  no change. The table must name every namespaced URL. Admin navigation renders for Admins on
+  every page and never for Recruiters. Each request runs in a rolled-back transaction.
+- `core/tests/test_accessibility.py` (6): every page in that table extends `base.html` and has
+  `lang="en"` and one `<h1>` first. No heading level is skipped. Every control is labelled, every
+  link and button has a name, and every `<th>` has a scope. Every table sits in `overflow-x-auto`,
+  and the drawer keeps `auto-cols-[max-content_minmax(0,1fr)]`.
+
+The badge, Hired for and job-summary tests failed for the expected reasons (missing badges,
+`counts` and the applications table). The permission and accessibility reviews passed against
+the existing pages, as an audit of Phases 1-12 should, and were then kept green while the new
+markup was added; mutation checks (below) show they can fail.
+
+Mistakes made and fixed during the phase:
+- **Overwritten tests:** writing `core/tests/test_badges.py` replaced an existing file holding the
+  three Phase 5 stage-badge style tests. `git status` showed it as modified rather than new; the
+  three tests were restored from `HEAD` into the same file and pass.
+- **Test strings after the markup changed:** "Hired for" also appears in the list's
+  `aria-label`, and the dashboard's "1 active application" is now followed by a badge.
+- **A JobSkill field name** in the new `database_state()` helper.
+
+**Green:**
+- **New partial:** `core/_awaiting_decision_badge.html`, used in `application_list.html`,
+  `_stage_card.html`, the candidate and job detail pages, and the dashboard.
+- **Candidate page:** `CandidateDetailView` passes `hired`. The template shows the Hired for
+  badges, and its applications table shows Job Closed and Awaiting Decision.
+- **Job page:** `JobDetailView` replaces `active_count` and `has_applications` with one
+  `applications` list and `counts`. The template adds an Applications card (Active, Hired and
+  Total tiles and a table); the closed-job note and the Delete button use the new context.
+- **Dashboard:** Job Closed on the Needs Attention closed-job rows and on Recent Activity rows,
+  and Awaiting Decision on Offer rows.
+- **Shared test helpers:** `database_state()` moved to `core.tests.utils` (now covering skills,
+  groups, group memberships and job skills too); new `queries_for()`.
+- **Docs:** README and CLAUDE.md updated.
+
+**Mutation checks** (each original restored and confirmed byte-identical):
+- removing `jobs.change_skill` from the Skills list's permissions → the permission review fails;
+- dropping `for=` from `_field.html` labels → 11 accessibility failures;
+- adding Awaiting Decision to stage-history rows → 3 badge failures.
+
+**Visual and phone-width check:** ten pages were rendered with the prototype dataset in a scratch
+SQLite file and checked in headless Edge: dashboard, both candidate pages, open and closed job
+pages, application list and detail, job list, staff list, candidate list. In a 375 px iframe
+each page's scroll width equals its client width, and nothing outside a scrolling table crosses
+the edge. Screenshots of the closed job page (desktop and phone), the archived hired candidate
+and an Offer application look as intended after the badge colour fix.
+
+**Verification:**
+- **624 of 624 tests pass:** 585 before (including the 3 restored), plus 39 new.
+- `ruff check` and `ruff format --check` are clean (126 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Remaining limitations:**
+- **Automated checks are structural:** colour contrast and screen-reader behaviour were checked
+  by eye in the screenshots, not measured.
+- **Phone width:** headless Edge can't open a window narrower than about 492 px, so the 375 px
+  measurement uses an iframe, as in earlier phases.
+- **Needs Attention:** still uncapped (accepted in Phase 12).
+
+**Approval and final review (2026-10-29):** the implementation, the four design decisions, the
+624 passing tests, the badges, the detail-page summaries, the permission review, the responsive
+layout, the accessibility checks and the documented limitations were approved. A final review of
+the diff found only Phase 13 changes (the badge partial and its uses, the candidate and job
+detail summaries, the dashboard badges, the five new test files, the shared test helpers, and the
+README, CLAUDE.md and PROMPTS.md updates).
+
+The three Phase 5 stage-badge tests (`StageBadgeTests`) and their `badge()` helper are
+byte-identical to the committed originals, and all three ran and passed in the full suite.
+Re-run before committing: 624 of 624 tests pass; Ruff lint and format are clean (126 files);
+`manage.py check`, `makemigrations --check --dry-run` and `migrate --check` are clean.
+
+**Result:** committed as "Phase 13: final badges, detail summaries, and accessibility" and
+pushed to `main`. Final submission not started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

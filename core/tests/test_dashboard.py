@@ -10,10 +10,9 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
-from candidates.models import Candidate
 from candidates.services import archive_candidate
 from candidates.tests.utils import make_candidate
-from core.tests.utils import PASSWORD, make_admin, make_recruiter, make_user
+from core.tests.utils import PASSWORD, database_state, make_admin, make_recruiter, make_user
 from jobs.models import JobOpening, JobStatus
 from jobs.tests.utils import make_job
 from pipeline.models import Application, Stage, StageChange
@@ -107,14 +106,6 @@ def needs_attention(response):
     return response.content.decode().split('id="needs-attention"')[1].split("</section>")[0]
 
 
-def database_state():
-    """Every row the dashboard reads, so a test can show a GET wrote nothing."""
-    return [
-        list(model.objects.order_by("pk").values_list())
-        for model in (Application, StageChange, Candidate, JobOpening, User)
-    ]
-
-
 class DashboardTestCase(TestCase):
     def setUp(self):
         self.user = make_recruiter("rita", first_name="Rita", last_name="Moreno")
@@ -180,7 +171,7 @@ class PrototypeDatasetTests(DashboardTestCase):
         response = self.get()
         self.assertContains(response, f'href="{self.jobs[3].get_absolute_url()}"')
         self.assertContains(response, "3 active applications")
-        self.assertContains(response, "1 active application<")
+        self.assertContains(response, "1 active application <span")
         self.assertNotIn("HR Generalist", needs_attention(response))
 
     def test_needs_attention_offers_longest_waiting_first(self):
@@ -191,8 +182,8 @@ class PrototypeDatasetTests(DashboardTestCase):
             self.assertContains(response, f'href="{self.applications[name].get_absolute_url()}"')
 
     def test_an_offer_on_a_closed_job_shows_job_closed(self):
-        # Samuel Moore, Product Designer; the closed-job rows don't repeat what their heading says.
-        self.assertEqual(needs_attention(self.get()).count("Job Closed"), 1)
+        # Phase 13: both closed-job rows, plus Samuel Moore's Offer on Product Designer.
+        self.assertEqual(needs_attention(self.get()).count("Job Closed"), 3)
 
     def test_recent_activity_shows_the_ten_newest(self):
         response = self.get()

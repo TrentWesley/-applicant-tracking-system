@@ -7,6 +7,7 @@
     {% endif %}
     <p class="flex flex-wrap items-center gap-2">
       {% include "core/_stage_badge.html" with stage=application.stage label=application.get_stage_display %}
+      {% include "core/_awaiting_decision_badge.html" %}
       <span class="text-sm text-base-content/70">since {{ application.stage_changed_at|date:"M j, Y, g:i a" }}</span>
     </p>
     {% if application.stage == "hired" %}<p class="text-sm">Hired is permanent.</p>{% endif %}
