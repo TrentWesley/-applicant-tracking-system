@@ -45,10 +45,12 @@ uv run python manage.py check
   `core/tests/utils.py` (`make_recruiter`, `make_admin`).
 - `candidates`: Candidate (`/candidates/`, `/candidates/archived/`, `/candidates/new/`,
   `/candidates/<pk>/`, `/candidates/<pk>/edit/`, POST `/candidates/<pk>/archive/` and
-  `/restore/`) and `candidates/services.py` (`archive_candidate`, `restore_candidate`,
-  `candidate_is_archived`); test helper `candidates.tests.utils.make_candidate`.
+  `/restore/`, Admin-only `/candidates/<pk>/delete/`) and `candidates/services.py`
+  (`archive_candidate`, `restore_candidate`, `candidate_is_archived`, `delete_candidate`); test
+  helper `candidates.tests.utils.make_candidate`.
 - `jobs`: JobOpening and Skill (`/jobs/`, `/jobs/new/`, `/jobs/<pk>/`, `/jobs/<pk>/edit/`,
-  POST `/jobs/<pk>/close/` and `/jobs/<pk>/reopen/`, `/jobs/?skill=<pk>`; Admin-only `/skills/`,
+  POST `/jobs/<pk>/close/` and `/jobs/<pk>/reopen/`, Admin-only `/jobs/<pk>/delete/`,
+  `/jobs/?skill=<pk>`; Admin-only `/skills/`,
   `/skills/new/`, `/skills/<pk>/edit/`, `/skills/<pk>/delete/`); test helpers
   `jobs.tests.utils.make_skill` and `make_job`.
 - `pipeline`: Application, StageChange and the single **stage-change service**
@@ -57,7 +59,8 @@ uv run python manage.py check
   `/applications/` (`?stage=<value>`, lowercase stored values such as `final_review`),
   `/applications/new/` (`?candidate=<pk>` preselects an active candidate), `/applications/<pk>/`
   (`?confirm=<action>` opens the inline note form; with `HX-Request` it returns only the stage
-  card), POST `/applications/<pk>/transition/` and `/applications/<pk>/notes/`. Test helper
+  card), POST `/applications/<pk>/transition/` and `/applications/<pk>/notes/`, Admin-only
+  `/applications/<pk>/delete/`. Test helper
   `pipeline.tests.utils.make_application` (creates through the service with a unique candidate;
   a `stage=` argument is set directly as test setup, so only the creation entry is in its
   history).
@@ -138,8 +141,22 @@ uv run python manage.py check
   Rejected/Withdrawn.
 - **StageChange is append-only:** the model refuses `save()` on an existing row and `delete()`,
   the queryset refuses `update()`, `bulk_update()` and `delete()`, and a SQLite trigger (`pipeline/0002`) refuses any
-  `UPDATE`. Rows go only through the cascade when their Application is deleted. Service refusals
-  raise `StageChangeRefused` with the user-facing message.
+  `UPDATE`. A second trigger (`pipeline/0005`) refuses deleting any row unless its application
+  exists, is at Applied and has exactly one entry, this creation entry, so the only deletion is
+  that entry going with its never-moved application (Django deletes history before the
+  application). The project's `flush` command (`pipeline/management/commands/flush.py`) lifts
+  that trigger for the flush and restores it, because Django's flush order varies between runs;
+  `TransactionTestCase` teardown uses it too. Service refusals raise `StageChangeRefused` with the
+  user-facing message.
+- **Admin permanent deletes:** `core.views.AdminDeleteView` (GET confirmation page
+  `core/confirm_delete.html`, POST delete) with a `delete` permission, which only Admins have.
+  Services `delete_candidate`, `delete_job`, `delete_application` call
+  `core.deletion.delete_or_refuse`, which deletes in one transaction and turns `ProtectedError` or
+  `IntegrityError` into `DeleteRefused` (a gone row gives "…was already deleted."). Each app's
+  `…deletion_blocker` explains why a record can't be deleted; Delete buttons render only for
+  Admins and only when the blocker is empty. Candidate and job deletes rely on PROTECT plus
+  SQLite's deferred foreign-key check; `TransactionTestCase` with a patched `Collector.collect`
+  tests that race.
 - **Stage card:** `pipeline/_stage_card.html` (`id="stage-card"`) renders only the moves from
   `services.available_moves(stage, reactivate_to)`. Advance and Back are one form each with hidden
   `action` and `expected_stage`, `hx-post`, `hx-target="#stage-card"` and

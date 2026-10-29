@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{# Confirmation step for every Admin permanent delete (core.views.AdminDeleteView). #}
+{% block title %}Delete {{ object }}{% endblock %}
+
+{% block content %}
+<div>
+  <a href="{{ object.get_absolute_url }}" class="link link-hover text-sm">← {{ object }}</a>
+  <h1 class="text-2xl font-bold">Delete {{ object }}?</h1>
+</div>
+
+<section class="card max-w-xl bg-base-100 shadow-sm">
+  <div class="card-body">
+    {% if refusal %}
+    <div class="alert alert-error" role="alert"><span>{{ refusal }}</span></div>
+    <div class="card-actions mt-2">
+      <a href="{{ object.get_absolute_url }}" class="btn">Back to {{ kind }}</a>
+    </div>
+    {% else %}
+    <p>{{ warning }}</p>
+    <form method="post" action="{{ request.path }}" class="card-actions mt-2">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-error">Delete {{ kind }}</button>
+      <a href="{{ object.get_absolute_url }}" class="btn btn-ghost">Cancel</a>
+    </form>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

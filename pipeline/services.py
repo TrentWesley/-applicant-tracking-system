@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from candidates.models import Candidate
 from candidates.services import candidate_is_archived, is_archived_guard_error
+from core.deletion import DeleteRefused, delete_or_refuse
 from jobs.models import JobOpening, JobStatus
 from pipeline.models import (
     ACTIVE_STAGES,
@@ -238,3 +239,33 @@ def _change_stage(application, action, expected_stage, changed_by, note):
             note=note,
         )
     return change
+
+
+APPLICATION_MOVED_MESSAGE = (
+    "This application can't be deleted because it has moved from Applied. Only an application "
+    "that never moved can be deleted, so stage history is never erased."
+)
+
+
+def application_deletion_blocker(application):
+    """Why `application` can't be deleted right now, or None. (Admin delete, Phase 10.)"""
+    stage = Application.objects.filter(pk=application.pk).values_list("stage", flat=True).first()
+    if stage is None:
+        return None  # already gone; the delete reports that
+    entries = StageChange.objects.filter(application_id=application.pk).count()
+    if stage != Stage.APPLIED or entries != 1:
+        return APPLICATION_MOVED_MESSAGE
+    return None
+
+
+def delete_application(application):
+    """
+    Permanently delete an application that never moved: at Applied with only its creation entry,
+    which CASCADE removes with it. The stage-history trigger (migration 0005) refuses the delete
+    if another request moved the application after this check.
+    """
+    with transaction.atomic():
+        blocker = application_deletion_blocker(application)
+        if blocker:
+            raise DeleteRefused(blocker)
+        delete_or_refuse(application, lambda: application_deletion_blocker(application))

@@ -11,6 +11,7 @@ urlpatterns = [
     path("jobs/<int:pk>/edit/", views.JobUpdateView.as_view(), name="job_update"),
     path("jobs/<int:pk>/close/", views.JobCloseView.as_view(), name="job_close"),
     path("jobs/<int:pk>/reopen/", views.JobReopenView.as_view(), name="job_reopen"),
+    path("jobs/<int:pk>/delete/", views.JobDeleteView.as_view(), name="job_delete"),
     path("skills/", views.SkillListView.as_view(), name="skill_list"),
     path("skills/new/", views.SkillCreateView.as_view(), name="skill_create"),
     path("skills/<int:pk>/edit/", views.SkillUpdateView.as_view(), name="skill_update"),

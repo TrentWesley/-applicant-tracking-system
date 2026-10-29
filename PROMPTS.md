@@ -2330,6 +2330,398 @@ started.
 
 ---
 
+## Entry 25
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 10 implementation (Admin permanent deletes)
+
+**Prompt:**
+```
+/implement Implement Phase 10 of my Applicant Tracking System using the approved plan at
+plans/applicant-tracking-system.md. Before beginning, read CLAUDE.md, the PRD, the implementation
+plan, and PROMPTS.md. Review the existing Candidate, JobOpening, Skill, Application, and
+StageChange models, their relationships, and the database-level safeguards established in
+earlier phases. Follow the exact Phase 10 user stories, acceptance criteria, and implementation
+tasks from the approved documents. Important requirements: implement only the permanent deletion
+functionality assigned to Phase 10; permanent deletion must be restricted to Admin users.
+Recruiters and unauthorized users must not be able to perform it, even through direct POST
+requests; require an explicit confirmation step before permanently deleting any record; use POST
+requests with CSRF protection for destructive actions. Never delete through GET; respect the
+existing database relationships, deletion protections, and immutable StageChange history;
+carefully handle records with related applications, hiring history, or other dependencies
+according to the approved PRD and plan; do not bypass database protections or introduce
+cascading deletion unless explicitly required by the approved documents; handle stale requests,
+missing records, and concurrent changes safely; provide clear, accessible confirmation screens and
+success/error feedback; preserve all functionality from Phases 1–9. Follow strict TDD
+(Red-Green-Refactor): write failing tests before implementing each feature; test allowed and
+refused deletions, permission enforcement, GET versus POST behavior, confirmation, related-record
+safeguards, and data integrity; include concurrency regression tests wherever the approved
+deletion rules depend on related records that could change between validation and deletion;
+verify that refused deletions leave all affected records and history unchanged. Before
+implementing, identify any ambiguity in the approved deletion rules and ask me to decide rather
+than making an irreversible behavior choice without approval. After implementation: run the
+complete automated test suite; run Ruff lint and format checks; run Django system and migration
+checks; update PROMPTS.md with the implementation process, decisions, tests, and results; report
+the final test count, implementation summary, remaining issues, and Git status. Stop after
+Phase 10 for my review. Do not commit or push without my approval. Do not begin Phase 11.
+```
+
+**Ambiguities found before implementing:**
+- **Asked and decided: how to protect the application delete rule.** "Only at Applied with exactly
+  one StageChange" (AC31) wasn't enforced by the database. Stage history was protected against
+  UPDATE only, and any cascade could delete it. I chose to **add a database trigger**, the
+  recommended option: a BEFORE DELETE trigger on stage history, plus a check in the service.
+- **Followed your instruction over the plan: confirmation for applications.** The plan says
+  application delete is just "POST, Admin only", but your instruction requires a confirmation
+  step for every record, so applications got one too.
+- **Not ambiguous:**
+  - candidate and job deletes already had database protection: `Application.candidate` and
+    `Application.job_opening` are PROTECT, and SQLite enforces foreign keys (`foreign_keys = 1`);
+  - an archived candidate with no applications can be deleted (the PRD's only rule is "no
+    applications");
+  - deleting a job removes its skill assignments (`JobSkill.job` has been CASCADE since Phase 3),
+    while the skills themselves stay.
+
+**Result:**
+Claude Code built Phase 10 in one Red-Green cycle, then fixed a problem the first run found.
+
+1. **Red:** 31 new tests in `candidates/tests/test_delete.py` (10), `jobs/tests/test_delete.py`
+   (8) and `pipeline/tests/test_delete.py` (13). The Phase 4 route-name test also now expects
+   `pipeline:application_delete`, and still fails on any name containing "stage" or "history".
+   - Failures were for the right reasons: missing routes, views and service, and the two
+     history-guard tests failing because no trigger existed.
+2. **Green:**
+   - **`core/deletion.py`:**
+     - `delete_or_refuse(instance, refusal)` deletes in one `atomic()` block and turns
+       `ProtectedError` or `IntegrityError` into `DeleteRefused(refusal())`. The message is built
+       afterwards, so it reflects the current data.
+     - It restores `instance.pk`, which Django clears even when the commit then fails.
+     - If the row was already gone, it raises "…was already deleted." (`gone=True`).
+   - **Services:**
+     - `candidates.services.delete_candidate` and `deletion_blocker`: "Ann Lee can't be deleted
+       because they have 2 applications. Archive the candidate instead; their hiring history is
+       kept.";
+     - `jobs.services.delete_job` and `deletion_blocker`: "…Close the job instead to stop new
+       applications; its hiring history is kept.";
+     - `pipeline.services.delete_application` and `application_deletion_blocker`: "This
+       application can't be deleted because it has moved from Applied…". The check and the delete
+       share one transaction.
+   - **Migration `pipeline/0005_stagechange_delete_guard`:** a BEFORE DELETE trigger on
+     `pipeline_stagechange` refuses deleting a row unless it's the creation entry (no
+     from-stage) of an application still at Applied. That covers the cascade from deleting any
+     application that ever moved, even one back at Applied.
+   - **Views:**
+     - `core.views.AdminDeleteView` (GET confirmation page, POST delete) with Django's `delete_*`
+       permission, which only the Admin group has; Recruiters and others get 403 on GET and
+       POST;
+     - a refusal re-renders the confirmation page with the reason in `role="alert"`, and nothing
+       is removed; an already-deleted record redirects to the list with an error message;
+     - `CandidateDeleteView`, `JobDeleteView` and `ApplicationDeleteView` at the plan's
+       `/<pk>/delete/` URLs.
+   - **Template `core/confirm_delete.html`:**
+     - "Delete Ann Lee?" as the `<h1>`, and a warning that says what goes with the record and that
+       it can't be undone;
+     - a CSRF-protected POST form with "Delete candidate / job opening / application" and Cancel;
+     - when the delete is refused, only the reason and "Back to …".
+   - **Delete buttons:** on the candidate, job and application pages, shown only to Admins and
+     only when the delete is possible (no applications; or Applied with one history entry).
+3. **Problem found and fixed: the trigger stopped Django from emptying the database.** The two
+   race tests use `TransactionTestCase`, which flushes every table after each test, in
+   alphabetical order (applications before history). The first version of the trigger refused
+   history rows whose application was already gone, so the flush failed.
+   - The trigger now checks only while the application row still exists. Django's own delete
+     path is still fully guarded, because its collector deletes an application's history before
+     the application.
+   - A regression test (`FlushStillWorksTests`) shows the flush succeeds with moved history in
+     the database.
+   - The local database had 0005 applied at that point; it was unapplied and reapplied with the
+     fixed trigger.
+4. **Refactor:** Ruff tidied imports. One test's SQL string was split for line length.
+
+**Mutation checks:**
+- **Trigger removed:** 3 tests failed: the ORM delete of a moved application, the raw history
+  delete, and the Advance-after-check race.
+- **`IntegrityError` no longer caught:** both candidate and job race tests failed with SQLite's
+  `FOREIGN KEY constraint failed`. So the deferred foreign-key check really does the refusing.
+  - **A first attempt at this mutation silently did nothing.** Ruff (targeting Python 3.14) had
+    written the clause in PEP 758 style, `except ProtectedError, IntegrityError:`, so the `sed`
+    pattern didn't match. That was spotted from the unexpected pass and re-run against the real
+    text.
+- Both originals were restored and checked.
+
+**Tests (AC10, AC17, AC31, AC2):**
+- **Candidate:**
+  - GET shows the confirmation and deletes nothing;
+  - an Admin deletes a candidate with no applications, including an archived one;
+  - any application (active or Hired) is refused on GET and POST, with the count, and no
+    candidate, application or history row is removed;
+  - a stale delete of an already-deleted candidate says so; unknown candidates get 404.
+- **Job:**
+  - an Admin deletes Open and Closed jobs with no applications; the skill assignments go and
+    the skills stay;
+  - any application is refused with "Close the job instead…", and the job's skills and all
+    applications and history remain;
+  - stale, already-deleted and 404 cases are handled.
+- **Application:**
+  - an Admin deletes a never-moved application (also on a closed job), and its single
+    StageChange is gone;
+  - refused: one that advanced and came back to Applied, Rejected, Withdrawn and Hired, with
+    the stage and every history row unchanged;
+  - after deletion, the detail page, transition and notes URLs all give 404;
+  - stale and 404 cases are handled.
+- **Permissions:**
+  - Recruiter, view-only and anonymous users can't use any of the three, on GET or POST, and
+    nothing is removed (AC2, AC31);
+  - Delete buttons appear only for Admins, and only when the delete is possible.
+- **Database guard:**
+  - deleting a moved application through the ORM, and deleting one history row with raw SQL,
+    are refused;
+  - a never-moved application still deletes with its creation entry.
+- **Races:**
+  - **Candidate and job** (`TransactionTestCase`, which commits for real): an application
+    committed after Django's PROTECT lookup still blocks the delete, and the friendly message is
+    shown;
+  - **Application:** an Advance committed after the eligibility check is refused by the trigger,
+    and the history is intact.
+- **Flush:** `FlushStillWorksTests`, described above.
+
+**Browser check:**
+- A throwaway server ran on scratch settings and a scratch database (deleted afterwards), with an
+  Admin user.
+- **Candidate confirmation page:** "Delete Cy Park?", the warning, a red "Delete candidate"
+  button and Cancel.
+- **Refused application delete:** the reason in a red alert, and only "Back to application".
+
+**Verification:**
+- **484 of 484 tests pass:** 452 before, plus 32 new (31 delete tests and the flush test).
+- `ruff check` and `ruff format --check` are clean (109 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes.
+- **Migration 0005:** it reverses (only its own trigger is dropped) and reapplies cleanly on the
+  local database, which has no applications. `migrate --check` is clean.
+- **Not started, as planned:** staff management (Phase 11), the dashboard (Phase 12), and the
+  Phase 13 badges and summaries.
+
+**Decisions to review:**
+- **One shared delete view and confirmation template** for all three records. The Phase 3 skill
+  delete is left as it was.
+- **Where you land after deleting:** a successful delete returns to that record's list
+  (candidates, jobs or applications), with "Candidate Ann Lee deleted." and so on.
+- **The trigger's limit:** it doesn't guard history rows whose application row is already gone,
+  so that `flush` works. Only hand-written SQL that deletes an application before its history
+  could get past it; Django never does that.
+- **The application page's Delete button doesn't refresh after an HTMX move.** If an Admin
+  advances an application and then clicks Delete without reloading, the confirmation page shows
+  the refusal. The server always re-checks.
+
+---
+
+## Entry 26
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 10 final review of migration 0005 and the application deletion safeguards
+
+**Prompt:**
+```
+Phase 10 looks good overall, and I approve the shared delete view/template, redirect behavior,
+and server-side refusal for stale Delete buttons. Before I approve the commit, please perform one
+narrowly scoped final review of migration 0005 and the application deletion safeguards: verify
+that the database trigger enforces the full AC31 rule: an application can be deleted only when
+its current stage is Applied and it has exactly one StageChange, which is its original creation
+entry; investigate the current exception for StageChange rows whose parent application no longer
+exists. Determine whether there is a stronger database-level safeguard that prevents
+unauthorized history deletion without breaking Django's flush, migrations, or
+TransactionTestCase teardown; if a safer solution is practical, implement it using
+Red-Green-Refactor and add focused regression tests. Do not introduce a broad redesign; if the
+existing approach is the best practical option for this SQLite coursework application, explain
+why, document its exact limitations, and demonstrate that all normal Django ORM deletion paths
+remain protected; verify that the delete service checks eligibility and performs deletion within
+one atomic transaction, including concurrent stage changes; re-run the complete test suite, Ruff
+lint and format checks, Django system checks, and migration checks. Confirm migration 0005
+reverses and reapplies successfully; update PROMPTS.md with this review, findings, any changes,
+and verification results. Do not commit or push yet. Do not begin Phase 11. Report your
+recommendation, any remaining limitations, the final test count, and Git status.
+```
+
+**Approval so far:** I approved the shared delete view and template, the redirect behaviour,
+and the server-side refusal for stale Delete buttons.
+
+**Findings:**
+1. **The trigger didn't enforce "exactly one StageChange".** A probe inside a rolled-back
+   transaction gave a never-moved application a second creation-style entry (raw SQL), and the
+   ORM delete was allowed.
+2. **The "application row already gone" exemption didn't actually make `flush` safe.**
+   - Django builds the flush table list from `django_table_names()`, which collects names in a
+     Python `set`. So the table order depends on the process's hash seed and varies between runs.
+     Entry 25 assumed it was alphabetical, which was wrong.
+   - When `pipeline_stagechange` happens to be emptied first, any moved history makes the flush
+     fail. `FlushStillWorksTests` had only passed by chance, and adding the count condition
+     exposed it.
+   - The exemption also let raw SQL bypass the guard by deleting the application row first.
+3. **A request already in progress when the application is deleted got a server error.** A stage
+   move that loaded the application just before an Admin deleted it raised
+   `Application.DoesNotExist` (a 500) instead of a 404.
+4. **Already correct:** `delete_application` runs its eligibility check and the delete inside one
+   `transaction.atomic()` (IMMEDIATE, so it takes the write lock at BEGIN). Every public Django
+   ORM path that could delete history was already refused.
+
+**Recommendation and changes (Red-Green, narrowly scoped):**
+- **A strict trigger, with migration 0005 edited in place.** It wasn't committed yet; it was
+  unapplied locally, edited, and reapplied.
+  - A history row may be deleted only if its application **exists**, is at Applied, and has
+    exactly one entry, and that row is the creation entry (no from-stage).
+  - Django deletes an application's history before the application, so an Admin's delete of a
+    never-moved application still works.
+  - Deleting history after its application row is gone is now refused, which closes the raw
+    application-first bypass. With foreign keys checked at commit, that transaction can never
+    commit.
+- **A project `flush` command** (`pipeline/management/commands/flush.py`, about 20 lines,
+  subclassing Django's).
+  - It reads the trigger's exact SQL from `sqlite_master`, drops the trigger, runs the normal
+    flush, and recreates the trigger in a `finally`, so it comes back even if the flush fails or
+    is cancelled. There's no copy of the migration's SQL to drift.
+  - `TransactionTestCase` teardown calls `call_command("flush")`, which uses an app's override,
+    so teardown, `manage.py flush` and tests all work in any table order.
+- **The transition view turns `Application.DoesNotExist` into a 404** ("This application was
+  deleted."). That is the in-flight case from finding 3.
+- **Red:** the new tests failed for the right reasons before each fix: the two-entry delete was
+  allowed; the history-first flush failed; the application-first bypass was allowed; the
+  in-flight move raised `DoesNotExist`.
+
+**New and changed tests:**
+- **`FullAc31RuleTests`:** an Applied application with two entries is refused by the trigger
+  itself.
+- **`OrmDeletionPathsTests`:** they passed straight away, because they document protection that
+  already existed:
+  - an instance delete and a queryset delete of a moved application are refused;
+  - a bulk `Application.objects.all().delete()` that includes a moved application removes
+    nothing;
+  - a queryset delete of only never-moved applications works.
+  
+  Also covered elsewhere: StageChange's own instance and queryset `delete()` raise
+  `HistoryIsImmutable`, and PROTECT stops deleting a referenced candidate, job or user
+  (`test_models.py`).
+- **`StrictHistoryGuardTests`:** raw SQL that deletes the application row first can't then
+  delete its history, for moved and never-moved applications.
+- **`FlushTests`** (replaces `FlushStillWorksTests`):
+  - `call_command("flush")` is run with the table order forced both ways (history first and
+    applications first) on a database with moved history. Both succeed, and the trigger is
+    present afterwards;
+  - the teardown-flush test is kept.
+- **`InFlightRequestOnADeletedApplicationTests`:** a transition already in flight when the
+  application is deleted gets a 404 (with and without HTMX), and no history is written.
+- **`pipeline/tests/test_delete_concurrency.py`:** real concurrency, using the Phase 8 worker
+  with a new `delete` scenario group: two threads, two connections, a SQLite file, and the first
+  request paused inside its transaction just after its check.
+  - **Advance in progress, then Delete:** the Advance succeeds, the Delete is refused ("…has
+    moved from Applied…"), and the application stays at Screening with 2 history entries.
+  - **Delete in progress, then Advance:** the Delete succeeds, and the Advance finds nothing
+    (`missing`, which the view turns into a 404). No application or history remains.
+  
+  It passed 3 runs in a row (about 2 s each).
+
+**Mutation checks** (each original restored and confirmed byte-identical):
+- **`flush` override removed:** the flush tests error, in both forced orders and on teardown.
+- **Count condition removed:** the two-entry test fails.
+- **The previous lenient trigger restored:** the application-first bypass test fails, for moved
+  and never-moved applications.
+- **Trigger removed entirely:** 12 failures across the guard, ORM-path, race, flush and bypass
+  tests.
+- **`transaction_mode = "IMMEDIATE"` removed:** both real-thread delete scenarios fail with
+  `OperationalError: database is locked`.
+
+**Remaining limitations** (all need hand-written SQL; none can be reached through Django's ORM or
+the app):
+- **Deleting only a never-moved application's creation entry with raw SQL is still allowed.** It
+  leaves a never-moved application with no history row. In SQLite this can't be told apart from
+  the first step of the legitimate cascade. No hiring history is lost (the application never
+  moved), and the ORM refuses StageChange deletes outright.
+- **The protection only works against application code.** Anyone who can run raw SQL against the
+  database file can `DROP TRIGGER`, and SQLite triggers can't tell a flush from any other
+  `DELETE`. That's why `flush` needs its own command.
+- **SQLite only.** The triggers and the `flush` override apply to SQLite, the project's only
+  database.
+- **Table rebuilds drop triggers.** A future schema change that makes Django rebuild
+  `pipeline_stagechange` (its SQLite table remake) would drop the triggers on that table (0002
+  and 0005), and a new migration would have to recreate them. The same applies to the Phase 4
+  trigger.
+- **One small in-flight window remains:** a notes save already in progress when an Admin deletes
+  the application still gets a server error instead of a 404. Only the stage-move path was in
+  this review's scope.
+
+**Verification:**
+- **493 of 493 tests pass:** 484 before this review, plus 9 new.
+- `ruff check` and `ruff format --check` are clean (113 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+- **Migration 0005 on the local database:** unapplied (only its trigger was dropped; the four
+  other triggers stayed) and reapplied with the strict trigger. The local database has no
+  applications.
+- **Real `manage.py flush`:** on a scratch database (deleted afterwards) holding 6 history rows,
+  4 of them moved, it emptied everything and the guard was present afterwards.
+
+**Result:** not committed or pushed, pending approval. Phase 11 not started.
+
+---
+
+## Entry 27
+
+**Date:** 2026-10-28
+
+**Phase:** Phase 10 approval and the in-flight notes save fix
+
+**Prompt:**
+```
+I approve the strengthened Phase 10 deletion safeguards, strict AC31 trigger, custom flush
+command, and concurrency handling. Before committing, please fix the one remaining issue: an
+application notes save already in progress when an Admin deletes that application can produce a
+server error. Follow Red-Green-Refactor: write a failing regression test reproducing an
+application notes save that encounters an application deleted by another request; update the
+notes view to handle the missing application gracefully with a 404, consistent with the
+stage-transition view; verify that neither the notes save nor the failed request recreates an
+application, modifies hiring history, or causes an unexpected database error; preserve existing
+HTMX and non-JavaScript notes behavior; keep this change narrowly scoped. Run the complete test
+suite, Ruff lint and format checks, Django system checks, and migration checks. Update
+PROMPTS.md with my approval, the regression test, fix, and verification results. After the
+checks pass, commit all approved Phase 10 work with the message "Phase 10: admin permanent
+deletion safeguards" and push to the existing GitHub main branch. Do not begin Phase 11 yet.
+```
+
+**Approval:** the strengthened Phase 10 deletion safeguards (Entry 26), the strict AC31 trigger
+in migration 0005, the custom `flush` command, and the concurrency handling were approved.
+
+**Red:** `InFlightRequestOnADeletedApplicationTests.test_a_notes_save_in_flight_when_the_application_is_deleted`
+(`pipeline/tests/test_delete.py`). The notes request's copy of the application is loaded, an
+Admin deletes the application, then the notes are posted with and without `HX-Request` (the
+view's `get_object` patched to return the stale copy). It failed for the expected reason:
+`SaveOnlyFormFieldsMixin` saves with `update_fields`, which raised `Application.NotUpdated`
+("Save with update_fields did not affect any rows"), a 500, and it also left the enclosing
+transaction marked broken (`TransactionManagementError` on the next query).
+
+**Green:** `ApplicationNotesView.form_valid` now saves inside its own `transaction.atomic()`
+block, so a failed save rolls back only that savepoint, and turns `Application.NotUpdated` into
+`Http404("This application was deleted.")`, matching the transition view. `update_fields` never
+inserts, so the application can't be recreated. No other change; the HTMX partial and the
+non-JavaScript redirect are unchanged (the existing notes tests still pass).
+
+**The test asserts:** 404 for both the HTMX and the non-JavaScript request; no application
+exists afterwards; no StageChange exists; and a new application can still be created in the same
+test transaction (no broken transaction left behind).
+
+**Verification:**
+- **494 of 494 tests pass:** 493 before, plus the 1 new regression test.
+- `ruff check` and `ruff format --check` are clean (113 files).
+- `manage.py check` reports no issues.
+- `makemigrations --check --dry-run` reports no changes; `migrate --check` is clean.
+
+**Result:** the "in-flight notes save" limitation from Entry 26 is resolved. The other Entry 26
+limitations (raw SQL only) remain as documented. Committed as "Phase 10: admin permanent
+deletion safeguards" and pushed to `main`. Phase 11 not started.
+
+---
+
 ## Future Entries
 
 Add a new entry for each significant interaction with Claude Code, especially during:

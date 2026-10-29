@@ -1,13 +1,20 @@
 from django.contrib import messages
 from django.contrib.messages.views import SuccessMessageMixin
 from django.shortcuts import get_object_or_404, redirect
+from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from candidates.forms import CandidateForm
 from candidates.models import Candidate
-from candidates.services import CandidateStatusRefused, archive_candidate, restore_candidate
-from core.views import StaffPermissionMixin
+from candidates.services import (
+    CandidateStatusRefused,
+    archive_candidate,
+    delete_candidate,
+    deletion_blocker,
+    restore_candidate,
+)
+from core.views import AdminDeleteView, StaffPermissionMixin
 
 
 class CandidateListView(StaffPermissionMixin, ListView):
@@ -71,3 +78,13 @@ class CandidateArchiveView(CandidateStatusActionView):
 class CandidateRestoreView(CandidateStatusActionView):
     change = staticmethod(restore_candidate)
     success_message = "{candidate} restored."
+
+
+class CandidateDeleteView(AdminDeleteView):
+    permission_required = "candidates.delete_candidate"
+    model = Candidate
+    delete_record = staticmethod(delete_candidate)
+    blocker = staticmethod(deletion_blocker)
+    kind = "candidate"
+    warning = "This permanently deletes the candidate and their details. It can't be undone."
+    success_url = reverse_lazy("candidates:candidate_list")

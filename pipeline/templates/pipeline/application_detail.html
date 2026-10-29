@@ -3,9 +3,15 @@
 {% block title %}{{ application }}{% endblock %}
 
 {% block content %}
-<div>
-  <a href="{% url 'pipeline:application_list' %}" class="link link-hover text-sm">← Applications</a>
-  <h1 class="text-2xl font-bold">{{ application }}</h1>
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <a href="{% url 'pipeline:application_list' %}" class="link link-hover text-sm">← Applications</a>
+    <h1 class="text-2xl font-bold">{{ application }}</h1>
+  </div>
+  {# Admin only, and only for an application that never moved; the next page asks to confirm. #}
+  {% if perms.pipeline.delete_application and application.stage == "applied" and history|length == 1 %}
+  <a href="{% url 'pipeline:application_delete' application.pk %}" class="btn btn-sm btn-error btn-outline">Delete</a>
+  {% endif %}
 </div>
 
 {% include "pipeline/_stage_card.html" %}

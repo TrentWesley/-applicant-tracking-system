@@ -8,10 +8,11 @@ from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
-from core.views import StaffPermissionMixin
+from core.views import AdminDeleteView, StaffPermissionMixin
 from jobs.forms import JobFilterForm, JobOpeningForm, SkillForm
 from jobs.models import JobOpening, JobStatus, Skill
-from jobs.services import JobStatusUnchanged, close_job, reopen_job
+from jobs.services import JobStatusUnchanged, close_job, delete_job, reopen_job
+from jobs.services import deletion_blocker as job_deletion_blocker
 from pipeline.models import ACTIVE_STAGES
 
 
@@ -46,7 +47,10 @@ class JobDetailView(StaffPermissionMixin, DetailView):
         active_count = 0
         if self.object.status == JobStatus.CLOSED:
             active_count = self.object.applications.filter(stage__in=ACTIVE_STAGES).count()
-        return super().get_context_data(active_count=active_count, **kwargs)
+        has_applications = self.object.applications.exists()  # the Admin Delete needs none
+        return super().get_context_data(
+            active_count=active_count, has_applications=has_applications, **kwargs
+        )
 
 
 class JobStatusActionView(StaffPermissionMixin, View):
@@ -144,3 +148,16 @@ class SkillDeleteView(StaffPermissionMixin, DeleteView):
             return self.render_to_response(self.get_context_data(form=form))
         messages.success(self.request, f"Skill {self.object.name} deleted.")
         return HttpResponseRedirect(self.get_success_url())
+
+
+class JobDeleteView(AdminDeleteView):
+    permission_required = "jobs.delete_jobopening"
+    model = JobOpening
+    delete_record = staticmethod(delete_job)
+    blocker = staticmethod(job_deletion_blocker)
+    kind = "job opening"
+    warning = (
+        "This permanently deletes the job opening and its skill assignments (the skills stay). "
+        "It can't be undone."
+    )
+    success_url = reverse_lazy("jobs:job_list")

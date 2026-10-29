@@ -14,4 +14,5 @@ urlpatterns = [
         name="application_transition",
     ),
     path("<int:pk>/notes/", views.ApplicationNotesView.as_view(), name="application_notes"),
+    path("<int:pk>/delete/", views.ApplicationDeleteView.as_view(), name="application_delete"),
 ]

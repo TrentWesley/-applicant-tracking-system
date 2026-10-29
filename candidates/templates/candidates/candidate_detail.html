@@ -21,6 +21,10 @@
     {% else %}
     <form method="post" action="{% url 'candidates:candidate_archive' candidate.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm btn-outline">Archive candidate</button></form>
     {% endif %}
+    {# Admin only, and only when there's nothing to keep; the next page asks to confirm. #}
+    {% if perms.candidates.delete_candidate and not applications %}
+    <a href="{% url 'candidates:candidate_delete' candidate.pk %}" class="btn btn-sm btn-error btn-outline">Delete</a>
+    {% endif %}
   </div>
   {% endif %}
 </div>

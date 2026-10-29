@@ -17,6 +17,10 @@
     {% else %}
     <form method="post" action="{% url 'jobs:job_close' job.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm btn-outline">Close job</button></form>
     {% endif %}
+    {# Admin only, and only with no applications; the next page asks to confirm. #}
+    {% if perms.jobs.delete_jobopening and not has_applications %}
+    <a href="{% url 'jobs:job_delete' job.pk %}" class="btn btn-sm btn-error btn-outline">Delete</a>
+    {% endif %}
   </div>
   {% endif %}
 </div>

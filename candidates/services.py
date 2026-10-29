@@ -22,6 +22,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from candidates.models import Candidate
+from core.deletion import delete_or_refuse
 from pipeline.models import ACTIVE_STAGES, Application
 
 ARCHIVED_GUARD = "archived-candidate guard"  # starts every trigger message in pipeline/0004
@@ -93,3 +94,23 @@ def restore_candidate(candidate):
     candidate.refresh_from_db()
     if updated != 1:
         raise CandidateStatusRefused(ALREADY_ACTIVE_MESSAGE)
+
+
+HAS_APPLICATIONS_MESSAGE = (
+    "{candidate} can't be deleted because they have {count} application{plural}. "
+    "Archive the candidate instead; their hiring history is kept."
+)
+
+
+def deletion_blocker(candidate):
+    """Why `candidate` can't be deleted right now, or None. (Admin delete, Phase 10.)"""
+    count = Application.objects.filter(candidate_id=candidate.pk).count()
+    if count:
+        plural = "" if count == 1 else "s"
+        return HAS_APPLICATIONS_MESSAGE.format(candidate=candidate, count=count, plural=plural)
+    return None
+
+
+def delete_candidate(candidate):
+    """Permanently delete a candidate with no applications (Application.candidate is PROTECT)."""
+    delete_or_refuse(candidate, lambda: deletion_blocker(candidate))

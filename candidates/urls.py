@@ -12,4 +12,5 @@ urlpatterns = [
     path("<int:pk>/edit/", views.CandidateUpdateView.as_view(), name="candidate_update"),
     path("<int:pk>/archive/", views.CandidateArchiveView.as_view(), name="candidate_archive"),
     path("<int:pk>/restore/", views.CandidateRestoreView.as_view(), name="candidate_restore"),
+    path("<int:pk>/delete/", views.CandidateDeleteView.as_view(), name="candidate_delete"),
 ]

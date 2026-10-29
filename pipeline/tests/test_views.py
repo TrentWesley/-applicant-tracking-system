@@ -340,6 +340,7 @@ class NoStageChangeScreensTests(TestCase):
                 "pipeline:application_detail",
                 "pipeline:application_transition",
                 "pipeline:application_notes",  # the application's own notes (Phase 9)
+                "pipeline:application_delete",  # Admin delete of a never-moved one (Phase 10)
             },
         )
         self.assertFalse({n for n in names if "stage" in n.lower() or "history" in n.lower()})

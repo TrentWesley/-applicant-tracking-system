@@ -1,23 +1,27 @@
 from typing import NamedTuple
 
 from django.contrib import messages
-from django.http import HttpResponseRedirect
+from django.db import transaction
+from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse_lazy
 from django.utils.cache import patch_vary_headers
 from django.utils.functional import cached_property
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from candidates.models import Candidate
-from core.views import StaffPermissionMixin
+from core.views import AdminDeleteView, StaffPermissionMixin
 from pipeline.forms import ApplicationForm, ApplicationNotesForm
 from pipeline.models import Application, Stage
 from pipeline.services import (
     NoteRequired,
     StageChangeRefused,
+    application_deletion_blocker,
     available_moves,
     change_stage,
     create_application,
+    delete_application,
     reactivation_target,
 )
 
@@ -147,6 +151,9 @@ class ApplicationTransitionView(StaffPermissionMixin, View):
                 changed_by=request.user,
                 note=request.POST.get("note", ""),
             )
+        except Application.DoesNotExist:
+            # An Admin deleted it after this request loaded it; the service found no row.
+            raise Http404("This application was deleted.") from None
         except StageChangeRefused as refusal:
             feedback = Feedback(ok=False, text=str(refusal))
             if isinstance(refusal, NoteRequired):
@@ -181,7 +188,13 @@ class ApplicationNotesView(StaffPermissionMixin, UpdateView):
     form_class = ApplicationNotesForm
 
     def form_valid(self, form):
-        self.object = form.save()
+        try:
+            # Its own atomic block, so a failed save rolls back only itself.
+            with transaction.atomic():
+                self.object = form.save()
+        except Application.NotUpdated:
+            # An Admin deleted it after this request loaded it; the update found no row.
+            raise Http404("This application was deleted.") from None
         return self.respond(form, Feedback(ok=True, text="Notes saved."))
 
     def form_invalid(self, form):
@@ -194,3 +207,16 @@ class ApplicationNotesView(StaffPermissionMixin, UpdateView):
         level = messages.SUCCESS if feedback.ok else messages.ERROR
         messages.add_message(self.request, level, feedback.text)
         return redirect(self.object)
+
+
+class ApplicationDeleteView(AdminDeleteView):
+    permission_required = "pipeline.delete_application"
+    model = Application
+    delete_record = staticmethod(delete_application)
+    blocker = staticmethod(application_deletion_blocker)
+    kind = "application"
+    warning = (
+        "This permanently deletes the application and its creation entry in the stage history. "
+        "It can't be undone."
+    )
+    success_url = reverse_lazy("pipeline:application_list")
